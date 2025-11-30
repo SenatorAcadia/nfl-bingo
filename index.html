@@ -1,21 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <!-- 
-    NFL Bingo v1.0
-    - FIXED: Host Trivia Win Logic (Local handling)
-    - UPDATED: Trivia timer reduced to 10 seconds
+    NFL BEANO LIVE v1.3
+    - VISUAL: Feed Row background = Home Team Color
+    - VISUAL: Feed Row Left Border = Away Team Color
+    - VISUAL: Logo Container background = White (for visibility)
+    - CORE: "RedZone" Polling (Scans all active games)
 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFL Bingo v1.0</title>
+    <title>NFL BEANO LIVE v1.3</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Titan+One&display=swap" rel="stylesheet">
 
     <style>
         :root {
             --bg-color: #0f172a;
-            --card-width: 360px;
+            --card-width: 350px;
         }
 
         * { box-sizing: border-box; }
@@ -65,74 +67,118 @@
         .btn-host { background: #3b82f6; color: white; }
         .btn-join { background: #10b981; color: white; }
 
+        /* --- PLAY FEED --- */
+        #play-feed {
+            width: 95%; max-width: 800px;
+            margin: 15px auto 0 auto;
+            background: #1e293b;
+            border: 2px solid #334155;
+            border-radius: 12px;
+            height: 160px;
+            overflow-y: scroll;
+            display: flex; flex-direction: column-reverse;
+            padding: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        
+        .feed-item {
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+            padding: 8px;
+            font-size: 0.85rem;
+            display: flex; align-items: center; gap: 10px;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* Dark overlay to make text readable on bright team colors */
+        .feed-item::before {
+            content:''; position:absolute; inset:0;
+            background: linear-gradient(90deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 100%);
+            z-index: 0;
+        }
+
+        .feed-logos {
+            position: relative; z-index: 1;
+            display: flex; gap: 2px; align-items: center;
+            background: #f8fafc; /* White background for logos */
+            padding: 4px; border-radius: 6px;
+            border: 2px solid #fff; 
+            min-width: 60px; justify-content: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        .feed-logos img { width: 24px; height: 24px; object-fit: contain; }
+        .feed-vs { font-size: 0.7rem; color: #333; font-weight: 900; }
+        
+        .feed-content { flex: 1; text-align: left; position: relative; z-index: 1; }
+        
+        .feed-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 2px; }
+        .feed-event { 
+            color: #0f172a; font-weight: 800; text-transform: uppercase; 
+            background: #fbbf24; padding: 2px 6px; border-radius: 3px;
+            font-size: 0.7rem; white-space: nowrap;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .feed-desc { color: #fff; font-size: 0.85rem; line-height: 1.2; text-shadow: 1px 1px 2px black; font-weight: 500; }
+
         /* --- GAME CONTAINER --- */
         #game-board {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
             align-items: flex-start;
-            padding: 70px 10px;
-            gap: 40px;
+            padding: 20px 10px 80px 10px;
+            gap: 30px;
             width: 100%;
-            min-height: 100vh;
         }
 
         /* --- PLAYER ZONE --- */
         .player-zone {
             background: #fff;
             border-radius: 20px;
-            padding: 25px;
+            padding: 15px;
             display: flex;
             flex-direction: column;
             align-items: center;
             border: 8px solid #333;
             box-shadow: 0 15px 40px rgba(0,0,0,0.6);
             position: relative;
-            transition: opacity 0.3s ease;
-            margin-bottom: 20px;
+            margin-top: 50px;
+            transition: transform 0.3s;
         }
         .player-zone.opponent { transform: scale(0.95); opacity: 0.95; }
         
         .player-header {
-            margin-top: -75px;
+            margin-top: -65px;
             display: flex; flex-direction: column; align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             z-index: 10;
         }
         .team-logo {
-            width: 100px; height: 100px;
+            width: 90px; height: 90px;
             background: white; border-radius: 50%;
             border: 5px solid white; object-fit: contain;
             box-shadow: 0 5px 15px rgba(0,0,0,0.2);
             position: relative; z-index: 2;
         }
-        .player-name-wrap {
-            margin-top: -20px;
-            position: relative; z-index: 1;
-            display: flex; flex-direction: column; align-items: center;
-        }
         .player-name {
-            font-family: 'Titan One', cursive; font-size: 2rem;
+            font-family: 'Titan One', cursive; font-size: 1.8rem;
             text-transform: uppercase;
             text-shadow: 2px 2px 0px rgba(0,0,0,0.4);
             color: white;
-            padding: 8px 25px 5px 25px; 
+            padding: 5px 20px; 
             border-radius: 30px;
+            margin-top: -10px;
             border: 4px solid white;
             white-space: nowrap;
-            max-width: 320px; overflow: hidden; text-overflow: ellipsis;
-        }
-        .trivia-badge {
-            background: #fbbf24; color: black;
-            font-weight: bold; font-size: 0.9rem;
-            padding: 2px 10px; border-radius: 10px;
-            margin-top: -10px; border: 2px solid white;
-            z-index: 3; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            max-width: 300px; overflow: hidden; text-overflow: ellipsis;
+            position: relative; z-index: 1;
         }
 
         /* CARDS */
-        .cards-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 25px; max-width: 100%; }
-        .single-card-wrap { width: var(--card-width); display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+        .single-card-wrap { width: var(--card-width); display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
         
         .bingo-grid-container {
             background: #000;
@@ -141,110 +187,73 @@
             border: 3px solid #000;
             box-shadow: 0 4px 10px rgba(0,0,0,0.2);
         }
-        .card-label { text-align: center; padding: 8px; font-weight: 900; color: white; font-size: 1rem; text-transform: uppercase; letter-spacing: 2px; }
-        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; background: #94a3b8; aspect-ratio: 1/1; }
+        .card-label { text-align: center; padding: 4px; font-weight: 900; color: white; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 2px; }
+        
+        .grid { 
+            display: grid; 
+            grid-template-columns: repeat(5, 1fr); 
+            grid-template-rows: repeat(5, 1fr);
+            gap: 2px; 
+            background: #94a3b8; 
+            aspect-ratio: 1/1; 
+        }
         
         .cell { 
             background: #f8fafc; color: #1e293b; 
             display: flex; align-items: center; justify-content: center; 
-            text-align: center; 
-            font-size: 8px; 
-            padding: 2px;
-            font-weight: 700; 
-            line-height: 1.1; 
-            user-select: none; 
-            word-wrap: break-word; 
-            word-break: break-word;
-            hyphens: auto; 
+            text-align: center; font-size: 9px; padding: 2px;
+            font-weight: 700; line-height: 1.1; 
+            user-select: none; word-wrap: break-word; word-break: break-word;
+            hyphens: auto;
         }
         
-        .cell.free { background: #1e293b !important; color: #fbbf24 !important; font-size: 12px; font-weight: 900; display: flex; flex-direction: column; justify-content: center; }
-        .cell.free span { font-size: 18px; margin-top:2px; display: block; }
+        .cell.free { background: #1e293b !important; color: #fbbf24 !important; font-size: 10px; font-weight: 900; display: flex; flex-direction: column; justify-content: center; }
+        .cell.free span { font-size: 16px; margin-top:2px; display: block; }
         .cell.marked { background: #fbbf24 !important; color: #000 !important; box-shadow: inset 0 0 10px rgba(0,0,0,0.1); }
         .cell.win { background: #ef4444 !important; color: white !important; animation: pulse 1s infinite; }
         @keyframes pulse { 0%{opacity:1;} 50%{opacity:0.6;} 100%{opacity:1;} }
         .is-me .cell:not(.free) { cursor: pointer; }
 
-        .reroll-row { display: flex; justify-content: space-between; align-items: center; background: #e2e8f0; padding: 8px 12px; border-radius: 8px; color: #333; font-weight: bold; font-size: 1rem; border: 2px solid #ccc; }
-        .btn-reroll { background: #ef4444; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: 'Titan One'; font-size: 0.9rem; text-transform: uppercase; }
+        .reroll-row { 
+            display: flex; justify-content: space-between; align-items: center; 
+            background: #f1f5f9; padding: 4px 8px; border-radius: 8px; 
+            color: #333; font-weight: bold; font-size: 0.8rem; border: 1px solid #ccc; 
+        }
+        .btn-reroll { 
+            background: #ef4444; color: white; border: none; 
+            padding: 3px 8px; border-radius: 4px; cursor: pointer; 
+            font-family: 'Titan One'; font-size: 0.7rem; text-transform: uppercase;
+            width: auto; margin: 0;
+        }
         .btn-reroll:disabled { background: #94a3b8; cursor: default; opacity: 0.6; }
 
         /* FOOTER */
         #footer-controls {
             position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%);
-            background: white; padding: 10px 25px; border-radius: 50px;
+            background: white; padding: 8px 20px; border-radius: 50px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            display: flex; gap: 15px; align-items: center; 
-            width: 90%; max-width: 650px; justify-content: space-between;
+            display: flex; gap: 10px; align-items: center; 
+            width: 90%; max-width: 600px; justify-content: space-between;
             z-index: 1000;
         }
         .footer-left { display: flex; align-items: center; gap: 10px; }
-        #room-label { color: #333; font-weight: 900; font-size: 1.2rem; font-family: 'Chakra Petch', sans-serif; }
+        #room-label { color: #333; font-weight: 900; font-size: 1.1rem; font-family: 'Chakra Petch', sans-serif; }
+        .btn-footer { padding: 6px 14px; font-size: 0.9rem; border-radius: 20px; background: #64748b; color: white; border: none; font-weight: 800; font-family: 'Chakra Petch', sans-serif; cursor: pointer; }
         
-        .btn-footer { 
-            padding: 8px 16px; 
-            font-size: 1rem; 
-            border-radius: 20px; 
-            width: auto; 
-            margin: 0; 
-            background: #64748b; 
-            color: white; 
-            border: none; 
-            font-weight: 800;
-            font-family: 'Chakra Petch', sans-serif;
-            text-shadow: none;
-            cursor: pointer;
-        }
-        
-        /* MODALS */
-        .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 7000;
-            display: none; justify-content: center; align-items: center;
-        }
-        .modal-content {
-            background: white; padding: 30px; border-radius: 20px; width: 90%; max-width: 500px;
-            text-align: center; color: #333; border: 5px solid #fff;
-            max-height: 80vh; overflow-y: auto;
-        }
-
-        /* TRIVIA */
-        #trivia-box {
-            position: fixed; top: -300px; left: 50%; transform: translateX(-50%);
-            width: 90%; max-width: 500px;
-            background: #fff;
-            color: #333 !important; 
-            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
-            border-radius: 0 0 20px 20px;
-            border: 5px solid #3b82f6; border-top: none;
-            z-index: 8000; padding: 20px;
-            transition: top 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            text-align: center;
-        }
-        #trivia-box.active { top: 0; }
-        .trivia-q { font-size: 1.2rem; font-weight: bold; margin-bottom: 15px; color: #0f172a; } 
-        .trivia-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .t-btn { background: #f1f5f9; color: #333; border: 2px solid #cbd5e1; padding: 15px; border-radius: 10px; font-weight: bold; cursor: pointer; }
-        .t-btn:hover { background: #e2e8f0; }
-        .t-btn.correct { background: #10b981; color: white; border-color: #10b981; }
-        .t-btn.wrong { background: #ef4444; color: white; border-color: #ef4444; opacity: 0.5; }
-
-        /* WINNER */
-        #winner-modal { display:none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 40px; border-radius: 30px; box-shadow: 0 0 100px rgba(251, 191, 36, 0.8); text-align: center; z-index: 9000; border: 10px solid #fbbf24; animation: popIn 0.5s; }
-        @keyframes popIn { from{transform:translate(-50%, -50%) scale(0.1);} to{transform:translate(-50%, -50%) scale(1);} }
-        #winner-text { font-family: 'Titan One'; font-size: 3rem; color: #0f172a; margin: 20px 0; }
-
-        /* INFO LIST */
+        /* UTILS */
+        .hidden { display: none !important; }
+        #error-banner { position: fixed; top:0; left:0; width:100%; background:red; color:white; text-align: center; padding: 10px; z-index: 10000; display: none; font-size: 0.8rem;}
+        #info-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 7000; display: none; justify-content: center; align-items: center; }
+        .modal-content { background: white; padding: 30px; border-radius: 20px; width: 90%; max-width: 500px; text-align: center; color: #333; border: 5px solid #fff; max-height: 80vh; overflow-y: auto; }
         .tier-list { text-align: left; margin-bottom: 15px; }
         .tier-head { font-weight: bold; padding: 5px; color: white; border-radius: 5px; margin-bottom: 5px; display: flex; justify-content: space-between; }
         .tier-items { font-size: 0.85rem; line-height: 1.4; color: #555; padding-left: 5px; }
-
+        #winner-modal { display:none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 40px; border-radius: 30px; box-shadow: 0 0 100px rgba(251, 191, 36, 0.8); text-align: center; z-index: 9000; border: 10px solid #fbbf24; animation: popIn 0.5s; }
+        @keyframes popIn { from{transform:translate(-50%, -50%) scale(0.1);} to{transform:translate(-50%, -50%) scale(1);} }
+        #winner-text { font-family: 'Titan One'; font-size: 3rem; color: #0f172a; margin: 20px 0; }
         #celebration { position: fixed; inset: 0; pointer-events: none; z-index: 5000; overflow: hidden; }
         .football { position: absolute; font-size: 5rem; animation: spinFly 3s linear infinite; }
         @keyframes spinFly { from { transform: translate(-100px, 100vh) rotate(0deg); } to { transform: translate(120vw, -200px) rotate(720deg); } }
-
-        .hidden { display: none !important; }
-        .waiting-msg { width: 100%; text-align: center; margin-top: 100px; font-size: 1.5rem; opacity: 0.5; animation: pulse 2s infinite; }
-        #error-banner { position: fixed; top:0; left:0; width:100%; background:red; color:white; text-align: center; padding: 10px; z-index: 10000; display: none; font-size: 0.8rem;}
 
     </style>
 </head>
@@ -252,36 +261,24 @@
 
     <div id="error-banner"></div>
 
-    <!-- TRIVIA DROPDOWN -->
-    <div id="trivia-box">
-        <h3 style="margin:0 0 10px 0; color:#3b82f6;">TRIVIA TIME!</h3>
-        <div id="t-question" class="trivia-q"></div>
-        <div id="t-options" class="trivia-opts"></div>
-        <div id="t-status" style="margin-top:10px; font-weight:bold;"></div>
-    </div>
-
-    <!-- WINNER MODAL -->
     <div id="winner-modal">
-        <span style="color:#ef4444; font-size:1.5rem; font-weight:bold;">BINGO!</span>
+        <span style="color:#ef4444; font-size:1.5rem; font-weight:bold;">BEANO!</span>
         <div id="winner-text"></div>
         <button onclick="document.getElementById('winner-modal').style.display='none'" style="background:#333; color:white; font-size:1rem; padding:10px; border:none; border-radius:5px; cursor:pointer;">CLOSE</button>
     </div>
 
-    <!-- INFO MODAL -->
-    <div id="info-modal" class="modal-overlay">
+    <div id="info-modal">
         <div class="modal-content">
             <h2>CARD INTEL</h2>
-            <p style="font-size:0.9rem; margin-bottom:20px;">Each card is generated using these probabilities to keep things fair and fun.</p>
             <div id="info-list"></div>
             <button onclick="document.getElementById('info-modal').style.display='none'" style="width:100%; background:#333; color:white; padding:15px; border:none; border-radius:10px; margin-top:10px; cursor:pointer;">CLOSE</button>
         </div>
     </div>
 
-    <!-- LOBBY -->
     <div id="lobby">
         <div class="lobby-card">
-            <h1>NFL BINGO</h1>
-            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 1 &bull; READY TO GO!</p>
+            <h1>NFL BEANO</h1>
+            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">LIVE v1.3 &bull; GLOBAL FEED</p>
 
             <div class="control-group">
                 <label>Your Name</label>
@@ -292,7 +289,7 @@
                 <label>Favorite Team</label>
                 <select id="lobby-team"></select>
             </div>
-
+            
             <div style="display:flex; gap:15px;">
                 <div class="control-group" style="flex:1">
                     <label>Cards</label>
@@ -302,20 +299,10 @@
                         <option value="3">3</option>
                     </select>
                 </div>
-                
                 <div class="control-group" style="flex:2">
-                    <label>Trivia Freq</label>
-                    <select id="trivia-timer-input">
-                        <option value="test">Test Mode (10-30s)</option>
-                        <option value="normal" selected>Normal (3-6m)</option>
-                        <option value="slow">Slow (10-15m)</option>
-                    </select>
+                     <label>Room Code</label>
+                     <input type="text" id="room-input" placeholder="HOST CREATES" style="text-transform:uppercase;">
                 </div>
-            </div>
-
-            <div class="control-group">
-                 <label>Room Code</label>
-                 <input type="text" id="room-input" placeholder="HOST GENERATES CODE" style="text-transform:uppercase;">
             </div>
 
             <div class="btn-row">
@@ -325,10 +312,12 @@
         </div>
     </div>
 
-    <!-- GAME BOARD -->
+    <div id="play-feed" class="hidden">
+        <div style="text-align:center; color:#666; font-size:0.8rem; padding:10px;">Scanning NFL RedZone...</div>
+    </div>
+
     <div id="game-board"></div>
 
-    <!-- CONTROLS -->
     <div id="footer-controls" class="hidden">
         <div class="footer-left">
             <span id="room-label"></span>
@@ -344,167 +333,99 @@
     <div id="celebration"></div>
 
 <script>
-    // --- DATA & CONFIG ---
-    
-    // RESTORED ORIGINAL LIST - MAPPED TO TIERS
+    // --- CONFIG ---
     const TIERS = {
-        common: {
-            label: "COMMON (12 per card)", color: "#10b981",
-            items: [
-                "TOUCHDOWN", "FIELD GOAL", "FIRST DOWN", "PASS > 20 YDS", 
-                "RUN > 10 YDS", "3RD & LONG", "PLAY ACTION", "SHOTGUN", 
-                "SACK", "PASS DEFENDED", "THROWN AWAY", "3-AND-OUT", 
-                "PENALTY FLAG", "HOLDING", "FALSE START", "TIMEOUT", 
-                "2-MIN WARNING", "INJURY"
-            ]
+        common: { 
+            label: "COMMON (12)", color: "#10b981", 
+            items: ["FIRST DOWN", "PUNT", "TIMEOUT", "PENALTY", "INC. PASS", "RUN 5+ YDS", "PASS 5+ YDS", "KICKOFF", "TOUCHBACK", "SACK", "RUN 10+ YDS", "PASS 10+ YDS"] 
         },
-        uncommon: {
-            label: "UNCOMMON (8 per card)", color: "#f59e0b",
-            items: [
-                "2-PT CONV", "QB SCRAMBLE", "4TH DOWN TRY", "SCREEN > 10", 
-                "QB SNEAK", "EMPTY BACKFIELD", "TFL", "TIPPED PASS", 
-                "INTERCEPTION", "FUMBLE", "TURNOVER", "GOAL LINE STAND", 
-                "RED ZONE STOP", "PASS INT", "DELAY OF GAME", "INT GROUNDING", 
-                "ROUGHING PASSER", "FACE MASK", "CHALLENGE FLAG", "MEASUREMENT"
-            ]
+        uncommon: { 
+            label: "UNCOMMON (8)", color: "#f59e0b", 
+            items: ["TOUCHDOWN", "FIELD GOAL", "TURNOVER", "INTERCEPTION", "FUMBLE", "4TH DOWN TRY", "RUN 15+ YDS", "PASS 15+ YDS", "TFL / LOSS", "REVIEW", "RETURN 10+ YDS"] 
         },
-        rare: {
-            label: "RARE (4 per card)", color: "#ef4444",
-            items: [
-                "HAIL MARY", "TRICK PLAY", "FAKE PUNT", "DEFENSIVE TD", 
-                "BLOCKED KICK", "OVERTIME", "COACH YELLING", "MASCOT", 
-                "BLIMP SHOT", "FAn WITH SIGN", "SHIRTLESS FAN", "TRUCK AD", 
-                "BEER AD", "HELMET THROW", "CHEERLEADER", "CELEBRITY", 
-                "HURDLE", "JUKE", "ONE-HANDED CATCH"
-            ]
+        rare: { 
+            label: "RARE (4)", color: "#ef4444", 
+            items: ["MISSED FG", "2-PT CONV", "SAFETY", "BLOCKED KICK", "DEFENSIVE TD", "INJURY", "OVERTIME", "RUN 20+ YDS", "PASS 20+ YDS", "RETURN 20+ YDS"] 
         }
     };
-
-    const TEAMS = {
-        "None": { n: "No Team Selected", c: "#333333", l: "nfl.svg" },
-        "ARI": { n: "Arizona Cardinals", c: "#97233F", l: "arizona-cardinals.svg" },
-        "ATL": { n: "Atlanta Falcons", c: "#A71930", l: "atlanta-falcons.svg" },
-        "BAL": { n: "Baltimore Ravens", c: "#241773", l: "baltimore-ravens.svg" },
-        "BUF": { n: "Buffalo Bills", c: "#00338D", l: "buffalo-bills.svg" },
-        "CAR": { n: "Carolina Panthers", c: "#0085CA", l: "carolina-panthers.svg" },
-        "CHI": { n: "Chicago Bears", c: "#0B162A", l: "chicago-bears.svg" },
-        "CIN": { n: "Cincinnati Bengals", c: "#FB4F14", l: "cincinnati-bengals.svg" },
-        "CLE": { n: "Cleveland Browns", c: "#311D00", l: "cleveland-browns.svg" },
-        "DAL": { n: "Dallas Cowboys", c: "#003594", l: "dallas-cowboys.svg" },
-        "DEN": { n: "Denver Broncos", c: "#FB4F14", l: "denver-broncos.svg" },
-        "DET": { n: "Detroit Lions", c: "#0076B6", l: "detroit-lions.svg" },
-        "GB":  { n: "Green Bay Packers", c: "#203731", l: "green-bay-packers.svg" },
-        "HOU": { n: "Houston Texans", c: "#03202F", l: "houston-texans.svg" },
-        "IND": { n: "Indianapolis Colts", c: "#002C5F", l: "indianapolis-colts.svg" },
-        "JAX": { n: "Jacksonville Jaguars", c: "#006778", l: "jacksonville-jaguars.svg" },
-        "KC":  { n: "Kansas City Chiefs", c: "#E31837", l: "kansas-city-chiefs.svg" },
-        "LV":  { n: "Las Vegas Raiders", c: "#000000", l: "oakland-raiders.svg" },
-        "LAC": { n: "Los Angeles Chargers", c: "#0080C6", l: "los-angeles-chargers.svg" },
-        "LAR": { n: "Los Angeles Rams", c: "#003594", l: "los-angeles-rams.svg" },
-        "MIA": { n: "Miami Dolphins", c: "#008E97", l: "miami-dolphins.svg" },
-        "MIN": { n: "Minnesota Vikings", c: "#4F2683", l: "minnesota-vikings.svg" },
-        "NE":  { n: "New England Patriots", c: "#002244", l: "new-england-patriots.svg" },
-        "NO":  { n: "New Orleans Saints", c: "#D3BC8D", l: "new-orleans-saints.svg" },
-        "NYG": { n: "New York Giants", c: "#0B2265", l: "new-york-giants.svg" },
-        "NYJ": { n: "New York Jets", c: "#125740", l: "new-york-jets.svg" },
-        "PHI": { n: "Philadelphia Eagles", c: "#004C54", l: "philadelphia-eagles.svg" },
-        "PIT": { n: "Pittsburgh Steelers", c: "#FFB612", l: "pittsburgh-steelers.svg" },
-        "SF":  { n: "San Francisco 49ers", c: "#AA0000", l: "san-francisco-49ers.svg" },
-        "SEA": { n: "Seattle Seahawks", c: "#002244", l: "seattle-seahawks.svg" },
-        "TB":  { n: "Tampa Bay Buccaneers", c: "#D50A0A", l: "tampa-bay-buccaneers.svg" },
-        "TEN": { n: "Tennessee Titans", c: "#0C2340", l: "tennessee-titans.svg" },
-        "WAS": { n: "Washington Commanders", c: "#5A1414", l: "washington-commanders.svg" }
+    
+    // Team Data - Includes Colors
+    const TEAMS = { 
+        "None": { n: "No Team", c: "#333", l: "nfl.svg" },
+        "ARI": { n: "Cardinals", c: "#97233F", l: "arizona-cardinals.svg" },
+        "ATL": { n: "Falcons", c: "#A71930", l: "atlanta-falcons.svg" },
+        "BAL": { n: "Ravens", c: "#241773", l: "baltimore-ravens.svg" },
+        "BUF": { n: "Bills", c: "#00338D", l: "buffalo-bills.svg" },
+        "CAR": { n: "Panthers", c: "#0085CA", l: "carolina-panthers.svg" },
+        "CHI": { n: "Bears", c: "#0B162A", l: "chicago-bears.svg" },
+        "CIN": { n: "Bengals", c: "#FB4F14", l: "cincinnati-bengals.svg" },
+        "CLE": { n: "Browns", c: "#311D00", l: "cleveland-browns.svg" },
+        "DAL": { n: "Cowboys", c: "#003594", l: "dallas-cowboys.svg" },
+        "DEN": { n: "Broncos", c: "#FB4F14", l: "denver-broncos.svg" },
+        "DET": { n: "Lions", c: "#0076B6", l: "detroit-lions.svg" },
+        "GB": { n: "Packers", c: "#203731", l: "green-bay-packers.svg" },
+        "HOU": { n: "Texans", c: "#03202F", l: "houston-texans.svg" },
+        "IND": { n: "Colts", c: "#002C5F", l: "indianapolis-colts.svg" },
+        "JAX": { n: "Jaguars", c: "#006778", l: "jacksonville-jaguars.svg" },
+        "KC": { n: "Chiefs", c: "#E31837", l: "kansas-city-chiefs.svg" },
+        "LV": { n: "Raiders", c: "#000", l: "oakland-raiders.svg" },
+        "LAC": { n: "Chargers", c: "#0080C6", l: "los-angeles-chargers.svg" },
+        "LAR": { n: "Rams", c: "#003594", l: "los-angeles-rams.svg" },
+        "MIA": { n: "Dolphins", c: "#008E97", l: "miami-dolphins.svg" },
+        "MIN": { n: "Vikings", c: "#4F2683", l: "minnesota-vikings.svg" },
+        "NE": { n: "Patriots", c: "#002244", l: "new-england-patriots.svg" },
+        "NO": { n: "Saints", c: "#D3BC8D", l: "new-orleans-saints.svg" },
+        "NYG": { n: "Giants", c: "#0B2265", l: "new-york-giants.svg" },
+        "NYJ": { n: "Jets", c: "#125740", l: "new-york-jets.svg" },
+        "PHI": { n: "Eagles", c: "#004C54", l: "philadelphia-eagles.svg" },
+        "PIT": { n: "Steelers", c: "#FFB612", l: "pittsburgh-steelers.svg" },
+        "SF": { n: "49ers", c: "#AA0000", l: "san-francisco-49ers.svg" },
+        "SEA": { n: "Seahawks", c: "#002244", l: "seattle-seahawks.svg" },
+        "TB": { n: "Buccaneers", c: "#D50A0A", l: "tampa-bay-buccaneers.svg" },
+        "TEN": { n: "Titans", c: "#0C2340", l: "tennessee-titans.svg" },
+        "WAS": { n: "Commanders", c: "#5A1414", l: "washington-commanders.svg" }
     };
+    
+    const TEAM_IDS = { "22":"ARI", "1":"ATL", "33":"BAL", "2":"BUF", "29":"CAR", "3":"CHI", "4":"CIN", "5":"CLE", "6":"DAL", "7":"DEN", "8":"DET", "9":"GB", "34":"HOU", "11":"IND", "30":"JAX", "12":"KC", "13":"LV", "24":"LAC", "14":"LAR", "15":"MIA", "16":"MIN", "17":"NE", "18":"NO", "19":"NYG", "20":"NYJ", "21":"PHI", "23":"PIT", "25":"SF", "26":"SEA", "27":"TB", "10":"TEN", "28":"WAS" };
 
-    const TRIVIA_DB = [
-        { q: "How many points is a touchdown worth?", o: ["3","6","7","10"], a: 1 },
-        { q: "Length of an NFL field (yards)?", o: ["100","110","120","90"], a: 0 },
-        { q: "Which team has the most Super Bowls?", o: ["Cowboys","Patriots/Steelers","49ers","Packers"], a: 1 },
-        { q: "How many players are on the field (per team)?", o: ["10","11","12","15"], a: 1 },
-        { q: "What is the NFL championship trophy called?", o: ["Stanley Cup","Lombardi","Heisman","Commissioner"], a: 1 },
-        { q: "How long is a quarter?", o: ["12 Min","15 Min","20 Min","10 Min"], a: 1 },
-        { q: "Yellow flag means?", o: ["Penalty","Timeout","Score","Review"], a: 0 },
-        { q: "Red flag means?", o: ["Ejection","Timeout","Challenge","Penalty"], a: 2 },
-        { q: "Who calls the signals on offense?", o: ["Center","Coach","Quarterback","Running Back"], a: 2 },
-        { q: "Points for a Safety?", o: ["1","2","3","6"], a: 1 },
-        { q: "What is 'The Gridiron'?", o: ["The Ball","The Field","The Helmet","The Jersey"], a: 1 },
-        { q: "How many downs to get 10 yards?", o: ["3","4","5","2"], a: 1 },
-        { q: "Team with a Star logo?", o: ["Texans","Cowboys","Patriots","Titans"], a: 1 },
-        { q: "Max weight of a football?", o: ["10oz","15oz","20oz","5oz"], a: 1 },
-        { q: "City of the Rams?", o: ["St. Louis","LA","Oakland","San Diego"], a: 1 }
-    ];
-
-    const WINS = [
-        [0,1,2,3,4], [5,6,7,8,9], [10,11,12,13,14], [15,16,17,18,19], [20,21,22,23,24], 
-        [0,5,10,15,20], [1,6,11,16,21], [2,7,12,17,22], [3,8,13,18,23], [4,9,14,19,24], 
-        [0,6,12,18,24], [4,8,12,16,20]
-    ];
-
+    const WINS = [[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],[0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],[0,6,12,18,24],[4,8,12,16,20]];
     const BROKER = 'wss://broker.emqx.io:8084/mqtt';
-    const TOPIC_PRE = 'nfl_beano_v8_9';
+    const TOPIC_PRE = 'nfl_beano_live_v1_3';
 
     // --- STATE ---
     let client, myId = 'p' + Math.random().toString(36).substr(2,6);
     let myName, myTeam, roomCode, isHost;
     let focusMode = false;
     let currentWinnerName = null;
-    let gameState = { players: {}, triviaScores: {} };
-    let triviaTimeout = null;
-    let triviaSettings = "normal"; // default
-    let ls, is_sel;
+    let gameState = { players: {} };
+    let processedPlays = {}; 
 
-    // --- INITIALIZATION ---
+    // --- INIT ---
     document.addEventListener('DOMContentLoaded', () => {
-        ls = document.getElementById('lobby-team');
-        is_sel = document.getElementById('ingame-team');
-        
-        // SORT TEAMS ALPHABETICALLY BY NAME
-        const sortedKeys = Object.keys(TEAMS).sort((a, b) => {
-            if (TEAMS[a].n < TEAMS[b].n) return -1;
-            if (TEAMS[a].n > TEAMS[b].n) return 1;
-            return 0;
-        });
-
-        // Populate Dropdowns
-        sortedKeys.forEach(t => {
-            const tm = TEAMS[t];
-            ls.innerHTML += `<option value="${t}">${tm.n}</option>`;
-            if(t !== "None") {
-                is_sel.innerHTML += `<option value="${t}">${tm.n}</option>`;
-            }
+        const ls = document.getElementById('lobby-team');
+        const is_sel = document.getElementById('ingame-team');
+        Object.keys(TEAMS).sort((a,b)=>(TEAMS[a].n<TEAMS[b].n?-1:1)).forEach(t => {
+            ls.innerHTML += `<option value="${t}">${TEAMS[t].n}</option>`;
+            if(t!=="None") is_sel.innerHTML += `<option value="${t}">${TEAMS[t].n}</option>`;
         });
     });
 
-    window.onerror = function(msg) {
-        const b = document.getElementById('error-banner');
-        b.style.display = 'block';
-        b.innerText = "Error: " + msg;
-        setTimeout(() => b.style.display='none', 5000);
-        return false;
-    };
-
     function initGame(host) {
-        const nameInput = document.getElementById('username').value.trim();
-        myName = nameInput || (host?"HOST":"GUEST");
-        myTeam = ls.value;
+        myName = document.getElementById('username').value.trim() || (host?"HOST":"GUEST");
+        myTeam = document.getElementById('lobby-team').value;
         isHost = host;
         
         if(host) {
             roomCode = Math.random().toString(36).substr(2,4).toUpperCase();
-            // Get Trivia Timing Choice
-            triviaSettings = document.getElementById('trivia-timer-input').value;
+            gameState.players[myId] = createPlayerData(myName, myTeam, parseInt(document.getElementById('card-count').value));
         } else {
             roomCode = document.getElementById('room-input').value.trim().toUpperCase();
             if(roomCode.length !== 4) return alert("Enter 4-letter Code");
         }
 
-        if(host) {
-            const cnt = parseInt(document.getElementById('card-count').value);
-            gameState.players[myId] = createPlayerData(myName, myTeam, cnt);
-            scheduleNextTrivia();
-        }
-
+        // UI Switch
         document.getElementById('lobby').classList.add('hidden');
+        document.getElementById('play-feed').classList.remove('hidden');
         document.getElementById('footer-controls').classList.remove('hidden');
         document.getElementById('room-label').innerText = roomCode;
         if(host) document.getElementById('reset-btn').style.display = 'block';
@@ -512,9 +433,11 @@
         
         render(); 
         connectMQTT();
+        
+        if(isHost) startRedZonePoller();
     }
 
-    // --- LOGIC ---
+    // --- GAME LOGIC ---
     function createPlayerData(name, team, count) {
         let p = { name: name, team: team, cards: [] };
         for(let i=0; i<count; i++) p.cards.push(newCard());
@@ -523,246 +446,142 @@
 
     function newCard() {
         const shuf = (arr) => [...arr].sort(()=>Math.random()-0.5);
-        
-        const cList = shuf(TIERS.common.items).slice(0, 12);
-        const uList = shuf(TIERS.uncommon.items).slice(0, 8);
-        const rList = shuf(TIERS.rare.items).slice(0, 4);
-        
-        let pool = shuf([...cList, ...uList, ...rList]);
+        const pool = shuf([...shuf(TIERS.common.items).slice(0,12), ...shuf(TIERS.uncommon.items).slice(0,8), ...shuf(TIERS.rare.items).slice(0,4)]);
         pool.splice(12, 0, "FREE");
-        
         return { events: pool, marked: [12], winLine: [], rerolls: 2 };
     }
 
-    function updateTeam() {
-        myTeam = document.getElementById('ingame-team').value;
-        if(gameState.players[myId]) {
-            gameState.players[myId].team = myTeam;
-            send({ type:'UPDATE_TEAM', team: myTeam });
-            render();
-        }
+    // --- REDZONE FEED LOGIC ---
+    function startRedZonePoller() {
+        setInterval(scanRedZone, 10000); 
     }
 
-    function toggleFocusMode() {
-        focusMode = !focusMode;
-        document.getElementById('toggle-view-btn').innerText = focusMode ? "SHOW OTHERS" : "HIDE OTHERS";
-        render();
+    async function scanRedZone() {
+        try {
+            // 1. Get Scoreboard to find ACTIVE games
+            const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard');
+            const data = await resp.json();
+            
+            data.events.forEach(async (e) => {
+                const status = e.status.type.state;
+                if(status === 'in') { // ACTIVE GAME
+                    fetchGameSummary(e.id);
+                }
+            });
+        } catch(e) { console.log(e); }
     }
 
-    function checkWin(c) {
-        for(let l of WINS) if(l.every(idx => c.marked.includes(idx))) return l;
-        return [];
+    async function fetchGameSummary(gid) {
+        try {
+            const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
+            const data = await resp.json();
+            
+            // Teams
+            const teams = data.boxscore.teams;
+            const t1 = TEAM_IDS[teams[0].team.id] || "None"; // Away
+            const t2 = TEAM_IDS[teams[1].team.id] || "None"; // Home (Usually)
+
+            // Latest Play
+            let lastPlay = null;
+            if(data.drives?.current?.plays?.length > 0) {
+                lastPlay = data.drives.current.plays[data.drives.current.plays.length - 1];
+            }
+
+            if(lastPlay && processedPlays[gid] !== lastPlay.id) {
+                processedPlays[gid] = lastPlay.id;
+                const analyzed = analyzePlay(lastPlay.text, lastPlay.type?.text || "");
+                
+                if(analyzed.length > 0) {
+                    const payload = {
+                        type: 'FEED_ITEM',
+                        events: analyzed,
+                        text: lastPlay.text,
+                        t1: t1,
+                        t2: t2
+                    };
+                    send(payload);
+                    addFeedItem(payload); // Host sees it too
+                }
+            }
+        } catch(e) { console.log(e); }
     }
 
-    function reroll(pIdx, cIdx) {
-        if(pIdx !== myId) return;
-        let p = gameState.players[myId];
-        let c = p.cards[cIdx];
-        if(c.rerolls > 0) {
-            if(confirm("Use 1 Reroll?")) {
-                c.rerolls--;
-                let nc = newCard();
-                c.events = nc.events;
-                c.marked = [12];
-                c.winLine = [];
-                render();
-                send({ type:'UPDATE', pData: p });
+    function analyzePlay(text, typeStr) {
+        const up = text.toUpperCase();
+        const typeUp = typeStr.toUpperCase();
+        let events = [];
+
+        if(up.includes("TOUCHDOWN")) events.push("TOUCHDOWN");
+        if(up.includes("FIELD GOAL") && !up.includes("NO GOOD") && !up.includes("MISSED")) events.push("FIELD GOAL");
+        if(up.includes("PUNT")) events.push("PUNT");
+        if(up.includes("SACK")) events.push("SACK");
+        if(up.includes("INTERCEPT") || typeUp.includes("INTERCEPT")) events.push("INTERCEPTION");
+        if(up.includes("FUMBLE")) events.push("FUMBLE");
+        if(up.includes("TIMEOUT")) events.push("TIMEOUT");
+        if(up.includes("PENALTY") || up.includes("FLAG")) events.push("PENALTY");
+        if(up.includes("INCOMPLETE")) events.push("INC. PASS");
+        if(typeUp.includes("KICKOFF")) events.push("KICKOFF");
+        if(up.includes("TOUCHBACK")) events.push("TOUCHBACK");
+        if(up.includes("REVERSED") || up.includes("REVIEW") || up.includes("CHALLENGE")) events.push("REVIEW");
+        if(up.includes("INJURY") || up.includes("INJURED")) events.push("INJURY");
+
+        const distMatch = up.match(/(\d+) (YD|YARD|YDS)/);
+        if(distMatch) {
+            const yds = parseInt(distMatch[1]);
+            const isPass = up.includes("PASS") || up.includes("COMPLETE") || up.includes("THROWN");
+            const isKick = up.includes("KICK") || up.includes("PUNT");
+            
+            if(!isPass && !isKick) {
+                if(yds >= 5) events.push("RUN 5+ YDS");
+                if(yds >= 10) events.push("RUN 10+ YDS");
+                if(yds >= 15) events.push("RUN 15+ YDS");
+                if(yds >= 20) events.push("RUN 20+ YDS");
+                if(yds < 0) events.push("TFL / LOSS");
+            }
+            if(isPass) {
+                if(yds >= 5) events.push("PASS 5+ YDS");
+                if(yds >= 10) events.push("PASS 10+ YDS");
+                if(yds >= 15) events.push("PASS 15+ YDS");
+                if(yds >= 20) events.push("PASS 20+ YDS");
+            }
+            if(isKick && (up.includes("RETURN") || !up.includes("TOUCHBACK"))) {
+                if(yds >= 10) events.push("RETURN 10+ YDS");
+                if(yds >= 20) events.push("RETURN 20+ YDS");
             }
         }
+        return events;
     }
 
-    function showInfo() {
-        const d = document.getElementById('info-list');
-        let h = "";
-        for(let k in TIERS) {
-            let t = TIERS[k];
-            h += `<div class="tier-list">
-                    <div class="tier-head" style="background:${t.color}"><span>${t.label}</span></div>
-                    <div class="tier-items">${t.items.join(", ")}</div>
-                  </div>`;
-        }
-        d.innerHTML = h;
-        document.getElementById('info-modal').style.display = 'flex';
+    function addFeedItem(msg) {
+        const feed = document.getElementById('play-feed');
+        const div = document.createElement('div');
+        div.className = 'feed-item';
+        
+        // Colors
+        const c1 = TEAMS[msg.t1] ? TEAMS[msg.t1].c : "#333";
+        const c2 = TEAMS[msg.t2] ? TEAMS[msg.t2].c : "#333";
+        const l1 = TEAMS[msg.t1] ? TEAMS[msg.t1].l : "nfl.svg";
+        const l2 = TEAMS[msg.t2] ? TEAMS[msg.t2].l : "nfl.svg";
+
+        // Row Style
+        div.style.background = c2; 
+        div.style.borderLeft = `8px solid ${c1}`;
+
+        div.innerHTML = `
+            <div class="feed-logos">
+                <img src="logos/${l1}">
+                <span class="feed-vs">vs</span>
+                <img src="logos/${l2}">
+            </div>
+            <div class="feed-content">
+                <div class="feed-badges">${msg.events.map(e => `<span class="feed-event">${e}</span>`).join('')}</div>
+                <div class="feed-desc">${msg.text}</div>
+            </div>
+        `;
+        feed.prepend(div);
     }
 
-    // --- TRIVIA SYSTEM ---
-    function scheduleNextTrivia() {
-        if(!isHost) return;
-        
-        // Determine Timing based on selection
-        let minTime, maxTime;
-        if(triviaSettings === "test") { minTime = 10000; maxTime = 30000; } // 10-30s
-        else if(triviaSettings === "slow") { minTime = 600000; maxTime = 900000; } // 10-15m
-        else { minTime = 180000; maxTime = 360000; } // 3-6m (default)
-
-        let delay = Math.floor(Math.random() * (maxTime - minTime + 1) + minTime);
-        console.log(`Next Trivia in ${(delay/1000).toFixed(0)}s (${triviaSettings})`);
-        
-        if(triviaTimeout) clearTimeout(triviaTimeout);
-        triviaTimeout = setTimeout(() => {
-            let qIdx = Math.floor(Math.random() * TRIVIA_DB.length);
-            
-            // 1. Host Launches Locally (The Fix for Host Visibility)
-            let qData = TRIVIA_DB[qIdx];
-            launchTrivia(qData);
-            
-            // 2. Host Sends to Network
-            send({ type: 'TRIVIA_START', qData: qData });
-            
-            scheduleNextTrivia(); 
-        }, delay);
-    }
-
-    function launchTrivia(qData) {
-        const box = document.getElementById('trivia-box');
-        const qt = document.getElementById('t-question');
-        const opts = document.getElementById('t-options');
-        const stat = document.getElementById('t-status');
-        
-        qt.innerText = qData.q;
-        opts.innerHTML = "";
-        stat.innerText = "";
-        
-        qData.o.forEach((opt, idx) => {
-            let b = document.createElement('button');
-            b.className = 't-btn';
-            b.innerText = opt;
-            
-            // NEW CLICK HANDLER WITH HOST LOGIC
-            b.onclick = () => {
-                Array.from(opts.children).forEach(btn => btn.disabled = true);
-                if(idx === qData.a) {
-                    b.classList.add('correct');
-                    
-                    if(isHost) {
-                        // HOST WINS IMMEDIATELY (Local Handling)
-                        stat.innerText = "YOU WON!";
-                        if(!gameState.triviaScores[myId]) gameState.triviaScores[myId] = 0;
-                        gameState.triviaScores[myId]++;
-                        send({ type: 'TRIVIA_RESULT', winnerName: myName });
-                        closeTrivia(myName);
-                        render();
-                    } else {
-                        // GUEST SENDS CLAIM
-                        stat.innerText = "CORRECT! Sending...";
-                        send({ type: 'TRIVIA_WIN' });
-                    }
-                } else {
-                    b.classList.add('wrong');
-                    stat.innerText = "WRONG!";
-                }
-            };
-            opts.appendChild(b);
-        });
-        box.classList.add('active');
-        // Reduced to 10 seconds per request
-        setTimeout(() => box.classList.remove('active'), 10000); 
-    }
-
-    function closeTrivia(winnerName) {
-        const box = document.getElementById('trivia-box');
-        const stat = document.getElementById('t-status');
-        stat.innerText = winnerName + " WON!";
-        setTimeout(() => box.classList.remove('active'), 3000);
-    }
-
-    // --- RENDER ---
-    function render() {
-        const board = document.getElementById('game-board');
-        const pIds = Object.keys(gameState.players);
-        pIds.sort((a,b) => (a===myId ? -1 : 1));
-
-        if(gameState.players[myId]) {
-            const t = TEAMS[gameState.players[myId].team];
-            document.body.style.backgroundColor = t ? t.c : "#0f172a";
-        }
-
-        if(pIds.length === 0) {
-            board.innerHTML = "<div class='waiting-msg'>CONNECTING...</div>";
-            return;
-        }
-
-        let html = "";
-        pIds.forEach(pid => {
-            const isMe = (pid === myId);
-            if(focusMode && !isMe) return;
-
-            const p = gameState.players[pid];
-            const tData = TEAMS[p.team] || TEAMS["None"];
-            const teamColor = tData.c;
-            const logoFile = tData.l;
-            const tScore = gameState.triviaScores[pid] || 0;
-            const isWinner = p.cards.some(c => c.winLine.length > 0);
-            
-            let cardsHtml = "";
-            p.cards.forEach((c, cIdx) => {
-                let cellsHtml = "";
-                c.events.forEach((evt, idx) => {
-                    let classes = "cell";
-                    if(idx===12) classes += " free";
-                    if(c.marked.includes(idx)) classes += " marked";
-                    if(c.winLine.includes(idx)) classes += " win";
-                    
-                    let clickAttr = isMe ? `onclick="cellClick('${pid}', ${cIdx}, ${idx})"` : "";
-                    cellsHtml += `<div class="${classes}" ${clickAttr}>${idx===12 ? 'FREE<br><span>🏈</span>' : evt}</div>`;
-                });
-
-                let rrBtn = "";
-                if(isMe) {
-                    let dis = c.rerolls <= 0 ? "disabled" : "";
-                    rrBtn = `<button class="btn-reroll" ${dis} onclick="reroll('${pid}', ${cIdx})">USE</button>`;
-                }
-
-                cardsHtml += `
-                    <div class="single-card-wrap">
-                        <div class="bingo-grid-container" style="border-color:${teamColor}">
-                            <div class="card-label" style="background:${teamColor}">CARD ${cIdx+1}</div>
-                            <div class="grid">${cellsHtml}</div>
-                        </div>
-                        <div class="reroll-row" style="border-color:${teamColor}">
-                            <span>REROLLS: ${c.rerolls}</span>
-                            ${rrBtn}
-                        </div>
-                    </div>
-                `;
-            });
-
-            html += `
-                <div class="player-zone ${isWinner ? 'winner' : ''} ${!isMe ? 'opponent' : 'is-me'}" style="border-color:${teamColor}">
-                    <div class="player-header">
-                        <img class="team-logo" src="logos/${logoFile}" style="border-color:${teamColor}" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iIzMzMyIvPjwvc3ZnPg=='">
-                        <div class="player-name-wrap">
-                            <div class="player-name" style="background:${teamColor}">${p.name}</div>
-                            <div class="trivia-badge">★ ${tScore}</div>
-                        </div>
-                    </div>
-                    <div class="cards-row">
-                        ${cardsHtml}
-                    </div>
-                </div>
-            `;
-        });
-
-        board.innerHTML = html;
-    }
-
-    window.cellClick = function(pId, cIdx, cellIdx) {
-        if(pId !== myId || cellIdx === 12) return;
-        
-        let p = gameState.players[myId];
-        let c = p.cards[cIdx];
-        
-        if(c.marked.includes(cellIdx)) c.marked = c.marked.filter(x => x!==cellIdx);
-        else c.marked.push(cellIdx);
-        
-        c.winLine = checkWin(c);
-        if(c.winLine.length > 0) announceWin(p.name);
-        
-        render();
-        send({ type: 'UPDATE', pData: p });
-    };
-
-    // --- NETWORK ---
+    // --- MQTT ---
     function connectMQTT() {
         client = mqtt.connect(BROKER);
         const t = `${TOPIC_PRE}/${roomCode}`;
@@ -772,47 +591,36 @@
             if(isHost) {
                 setInterval(() => send({ type: 'STATE', state: gameState }), 2000);
             } else {
-                const cnt = parseInt(document.getElementById('card-count').value);
-                let iv = setInterval(() => {
-                    if(gameState.players[myId]) clearInterval(iv);
-                    else send({ type: 'JOIN', name: myName, team: myTeam, count: cnt });
-                }, 1500);
+                // JOIN IMMEDIATELY
+                send({ type: 'JOIN', name: myName, team: myTeam, count: parseInt(document.getElementById('card-count').value) });
+                let joinInt = setInterval(() => {
+                    if(gameState.players[myId]) clearInterval(joinInt);
+                    else send({ type: 'JOIN', name: myName, team: myTeam, count: parseInt(document.getElementById('card-count').value) });
+                }, 2000);
             }
         });
 
         client.on('message', (tpc, m) => {
             try {
                 const msg = JSON.parse(m.toString());
+                if(msg.type === 'FEED_ITEM') {
+                    // Guests receive feed from Host
+                    if(!isHost) addFeedItem(msg);
+                    return; 
+                }
                 if(msg.sender === myId) return;
 
-                // Handle Trivia Start with FULL DATA
-                if(msg.type === 'TRIVIA_START') {
-                    // Check if we already received this payload to avoid double launch (though safe to relaunch)
-                    launchTrivia(msg.qData);
-                }
-                
                 if(isHost) {
-                    if(msg.type === 'JOIN' && !gameState.players[msg.sender]) {
+                    if(msg.type === 'JOIN') {
                         gameState.players[msg.sender] = createPlayerData(msg.name, msg.team, msg.count);
                         render();
                         send({ type: 'STATE', state: gameState });
                     }
                     if(msg.type === 'UPDATE') {
                         gameState.players[msg.sender] = msg.pData;
-                        checkForWins();
+                        checkGlobalWin();
                         render();
                         send({ type: 'STATE', state: gameState });
-                    }
-                    if(msg.type === 'TRIVIA_WIN') {
-                        if(!gameState.triviaScores[msg.sender]) gameState.triviaScores[msg.sender] = 0;
-                        gameState.triviaScores[msg.sender]++;
-                        
-                        // HOST UPDATE
-                        let winnerName = gameState.players[msg.sender].name;
-                        closeTrivia(winnerName);
-
-                        send({ type: 'TRIVIA_RESULT', winnerName: winnerName });
-                        render();
                     }
                     if(msg.type === 'UPDATE_TEAM') {
                         if(gameState.players[msg.sender]) {
@@ -820,78 +628,160 @@
                             render();
                         }
                     }
-                } 
-                else {
-                    if(msg.type === 'STATE') handleServerState(msg.state);
-                    if(msg.type === 'TRIVIA_RESULT') closeTrivia(msg.winnerName);
+                } else {
+                    if(msg.type === 'STATE') {
+                        let local = gameState.players[myId];
+                        gameState = msg.state;
+                        if(local && gameState.players[myId] && JSON.stringify(local.cards[0].events) === JSON.stringify(gameState.players[myId].cards[0].events)) {
+                            gameState.players[myId] = local;
+                        }
+                        checkGlobalWin();
+                        render();
+                    }
                 }
             } catch(e) { console.log(e); }
         });
     }
 
-    function handleServerState(serverState) {
-        const localMe = gameState.players[myId];
-        const serverMe = serverState.players[myId];
-        gameState = serverState; 
-        if(localMe && serverMe) {
-            const sameGame = JSON.stringify(localMe.cards.map(c=>c.events)) === JSON.stringify(serverMe.cards.map(c=>c.events));
-            if(sameGame) gameState.players[myId] = localMe;
-            else gameState.players[myId] = serverMe;
-        }
-        checkForWins();
-        render();
-    }
-
-    function checkForWins() {
+    function checkGlobalWin() {
         let winnerFound = null;
         Object.values(gameState.players).forEach(p => {
-            if(p.cards.some(c => c.winLine.length > 0)) {
-                winnerFound = p.name;
-            }
+            if(p.cards.some(c => c.winLine.length > 0)) winnerFound = p.name;
         });
-        if(winnerFound && currentWinnerName !== winnerFound) announceWin(winnerFound);
-        else if (!winnerFound) currentWinnerName = null;
+        if(winnerFound && currentWinnerName !== winnerFound) {
+            currentWinnerName = winnerFound;
+            document.getElementById('winner-text').innerText = winnerFound + " WINS!";
+            document.getElementById('winner-modal').style.display = 'block';
+            celebrate();
+        } else if (!winnerFound) {
+            currentWinnerName = null; 
+        }
     }
 
-    function announceWin(name) {
-        currentWinnerName = name;
-        document.getElementById('winner-text').innerText = name + " WINS!";
-        document.getElementById('winner-modal').style.display = 'block';
-        celebrate();
+    function send(pl) { pl.sender = myId; if(client) client.publish(`${TOPIC_PRE}/${roomCode}`, JSON.stringify(pl)); }
+
+    // --- RENDER ---
+    function render() {
+        const board = document.getElementById('game-board');
+        const pIds = Object.keys(gameState.players);
+        
+        if(pIds.length === 0) {
+            board.innerHTML = "<div class='waiting-msg'>Connecting...</div>";
+            return;
+        }
+
+        pIds.sort((a,b) => (a===myId ? -1 : 1));
+        
+        if(gameState.players[myId]) {
+            const t = TEAMS[gameState.players[myId].team];
+            document.body.style.backgroundColor = t ? t.c : "#0f172a";
+        }
+
+        let html = "";
+        pIds.forEach(pid => {
+            if(focusMode && pid !== myId) return;
+            const p = gameState.players[pid];
+            const tData = TEAMS[p.team] || TEAMS["None"];
+            const isMe = (pid === myId);
+            const isWinner = p.cards.some(c => c.winLine.length > 0);
+
+            let cardsHtml = "";
+            p.cards.forEach((c, cIdx) => {
+                let cellsHtml = "";
+                c.events.forEach((evt, idx) => {
+                    let classes = "cell" + (idx===12 ? " free" : "") + (c.marked.includes(idx) ? " marked" : "") + (c.winLine.includes(idx) ? " win" : "");
+                    let click = isMe ? `onclick="cellClick('${pid}', ${cIdx}, ${idx})"` : "";
+                    cellsHtml += `<div class="${classes}" ${click}>${idx===12 ? 'FREE<br><span>🏈</span>' : evt}</div>`;
+                });
+                let rr = isMe ? `<button class="btn-reroll" ${c.rerolls<=0?'disabled':''} onclick="reroll('${pid}',${cIdx})">USE</button>` : "";
+                cardsHtml += `
+                    <div class="single-card-wrap">
+                        <div class="bingo-grid-container" style="border-color:${tData.c}">
+                            <div class="card-label" style="background:${tData.c}">CARD ${cIdx+1}</div>
+                            <div class="grid">${cellsHtml}</div>
+                        </div>
+                        <div class="reroll-row" style="border-color:${tData.c}"><span>REROLLS: ${c.rerolls}</span>${rr}</div>
+                    </div>`;
+            });
+
+            html += `
+                <div class="player-zone ${isWinner?'winner':''} ${!isMe?'opponent':''}" style="border-color:${tData.c}">
+                    <div class="player-header">
+                        <img class="team-logo" src="logos/${tData.l}" style="border-color:${tData.c}" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iIzMzMyIvPjwvc3ZnPg=='">
+                        <div class="player-name" style="background:${tData.c}">${p.name}</div>
+                    </div>
+                    ${cardsHtml}
+                </div>
+            `;
+        });
+        board.innerHTML = html;
     }
 
-    function send(pl) { 
-        pl.sender = myId; 
-        if(client && client.connected) client.publish(`${TOPIC_PRE}/${roomCode}`, JSON.stringify(pl)); 
+    window.cellClick = function(pid, cIdx, idx) {
+        if(pid !== myId || idx===12) return;
+        let p = gameState.players[myId];
+        let c = p.cards[cIdx];
+        if(c.marked.includes(idx)) c.marked = c.marked.filter(x=>x!==idx);
+        else c.marked.push(idx);
+        
+        c.winLine = [];
+        for(let l of WINS) if(l.every(x => c.marked.includes(x))) c.winLine = l;
+        
+        render();
+        send({ type: 'UPDATE', pData: p });
+    };
+
+    window.reroll = function(pid, cIdx) {
+        if(pid!==myId) return;
+        let p = gameState.players[myId];
+        if(p.cards[cIdx].rerolls > 0 && confirm("Burn 1 Reroll?")) {
+            p.cards[cIdx].rerolls--;
+            let nc = newCard();
+            p.cards[cIdx].events = nc.events;
+            p.cards[cIdx].marked = [12];
+            render();
+            send({ type: 'UPDATE', pData: p });
+        }
+    };
+
+    window.updateTeam = function() {
+        let t = document.getElementById('ingame-team').value;
+        if(gameState.players[myId]) {
+            gameState.players[myId].team = t;
+            render();
+            send({ type: 'UPDATE_TEAM', team: t });
+        }
     }
 
-    function resetAll() {
+    window.toggleFocusMode = function() { focusMode = !focusMode; document.getElementById('toggle-view-btn').innerText = focusMode?"SHOW OTHERS":"HIDE OTHERS"; render(); }
+    window.showInfo = function() {
+        let h = "";
+        for(let k in TIERS) h += `<div class="tier-list"><div class="tier-head" style="background:${TIERS[k].color}"><span>${TIERS[k].label}</span></div><div class="tier-items">${TIERS[k].items.join(", ")}</div></div>`;
+        document.getElementById('info-list').innerHTML = h;
+        document.getElementById('info-modal').style.display='flex';
+    }
+    window.resetAll = function() {
         if(!isHost) return;
-        if(confirm("New Cards for Everyone?")) {
+        if(confirm("New Cards for EVERYONE?")) {
             Object.keys(gameState.players).forEach(pid => {
                 let p = gameState.players[pid];
                 gameState.players[pid] = createPlayerData(p.name, p.team, p.cards.length);
             });
             currentWinnerName = null;
-            document.getElementById('winner-modal').style.display = 'none';
+            document.getElementById('winner-modal').style.display='none';
             render();
             send({ type: 'STATE', state: gameState });
         }
     }
-
     function celebrate() {
         const b = document.getElementById('celebration');
         if(b.childElementCount > 5) return;
         for(let i=0; i<30; i++){
             let f = document.createElement('div'); f.className='football'; f.innerHTML='🏈';
-            f.style.left = (Math.random() * 100) + 'vw';
-            f.style.animationDuration=(Math.random()*2+2)+'s';
-            f.style.fontSize = (Math.random()*4+2) + 'rem';
-            b.appendChild(f); 
-            setTimeout(()=>f.remove(), 4000);
+            f.style.left = Math.random()*100+'vw'; f.style.animationDuration=(Math.random()*2+2)+'s'; f.style.fontSize=(Math.random()*4+2)+'rem';
+            b.appendChild(f); setTimeout(()=>f.remove(),4000);
         }
     }
 </script>
 </body>
 </html>
-
