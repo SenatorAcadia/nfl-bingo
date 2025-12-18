@@ -1,23 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
 <!-- 
-    NFL BEANO v19.0
-    - DATA: Exact Logo Filenames mapped (including CFL/Expansion).
-    - LOGIC: "Hive Mind" enabled (Joiners can add games to the feed).
-    - FIX: Confetti now triggered by explicit Host Command (Reliable).
-    - FIX: Raiders logo mapped to Oakland file (since LV file is missing).
+    NFL BEANO v21.1
+    - DATA: Normalized Team Names (Full City + Name for everyone).
+    - UI: Team Dropdown is now perfectly consistent.
+    - CORE: Same stable v21.0 logic (Highlighter Win, Exclusive Buckets, etc).
 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFL BEANO v19.0</title>
+    <title>NFL BEANO v21.1</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Titan+One&display=swap" rel="stylesheet">
 
     <style>
         :root { --bg-color: #0f172a; --card-width: 360px; }
         * { box-sizing: border-box; }
-        body { margin: 0; padding: 0; background: var(--bg-color); color: white; font-family: 'Chakra Petch', sans-serif; overflow-x: hidden; transition: background-color 0.5s ease; padding-bottom: 90px; }
+        body { margin: 0; padding: 0; background: var(--bg-color); color: white; font-family: 'Chakra Petch', sans-serif; overflow-x: hidden; transition: background-color 0.5s ease; padding-bottom: 120px; }
 
         /* LOBBY */
         #lobby { position: fixed; inset: 0; z-index: 9999; background: rgba(15, 23, 42, 0.98); display: flex; justify-content: center; align-items: center; overflow-y: auto; }
@@ -34,6 +33,7 @@
         .lobby-btn:disabled { background: #94a3b8; cursor: not-allowed; opacity: 0.7; }
         .btn-host { background: #3b82f6; color: white; }
         .btn-join { background: #10b981; color: white; }
+        .warning-text { font-size: 0.75rem; color: #ef4444; background: #fee2e2; padding: 8px; border-radius: 6px; margin-top: 15px; text-align: left; border-left: 4px solid #ef4444; line-height: 1.3; }
 
         /* FEED */
         #feed-container { width: 95%; max-width: 900px; margin: 10px auto 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border-radius: 12px; overflow: hidden; background: #1e293b; border: 2px solid #334155; display: flex; flex-direction: column; }
@@ -44,7 +44,6 @@
         #feed-live { flex: 6; background: #1e293b; overflow-y: scroll; border-right: 2px solid #334155; display: flex; flex-direction: column-reverse; padding: 8px; }
         #feed-board { flex: 4; background: #0f172a; overflow-y: scroll; display: flex; flex-direction: column; padding: 8px; }
         .feed-header { position: sticky; top: 0; background: rgba(15,23,42,0.9); color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-align: center; padding: 4px; text-transform: uppercase; letter-spacing: 1px; z-index: 5; border-bottom: 1px solid #334155; }
-        
         .live-item { display: flex; align-items: center; gap: 8px; padding: 8px; margin-bottom: 6px; border-radius: 8px; min-height: 50px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); background: #334155; width: 100%; }
         .feed-logo { width: 32px; height: 32px; min-width: 32px; object-fit: contain; background: white; border-radius: 50%; padding: 2px; border: 2px solid rgba(255,255,255,0.5); flex-shrink: 0; }
         .feed-text-bubble { background: white; color: #333; padding: 8px 12px; border-radius: 12px; font-size: 0.8rem; line-height: 1.2; font-weight: 700; flex: 1; min-width: 0; word-wrap: break-word; overflow-wrap: break-word; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -60,6 +59,7 @@
         .team-logo { width: 70px; height: 70px; object-fit: contain; }
         .player-name { font-family: 'Titan One', cursive; font-size: 1.8rem; text-transform: uppercase; color: white; padding: 8px 25px 5px 25px; border-radius: 30px; border: 4px solid white; margin-top: -20px; z-index: 1; text-shadow: 2px 2px 0 rgba(0,0,0,0.3); white-space: nowrap; }
 
+        /* GRID */
         .single-card-wrap { width: var(--card-width); }
         .bingo-grid-container { background: #000; border-radius: 12px 12px 0 0; overflow: hidden; border: 3px solid #000; border-bottom: none; }
         .card-label { text-align: center; padding: 6px; font-weight: 900; color: white; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 2px; }
@@ -68,9 +68,9 @@
         .cell.free { background: #1e293b !important; display: flex; align-items: center; justify-content: center; }
         .cell.unlocked { cursor: pointer; }
         .cell.unlocked:active { background: #cbd5e1; }
+        /* HIGHLIGHTER WIN STYLE */
         .cell.marked { color: white !important; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
-        .cell.win { z-index: 5; box-shadow: 0 0 15px #fbbf24; animation: pulse 1s infinite; }
-        @keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.05);} 100%{transform:scale(1);} }
+        .cell.win { background-color: #fbbf24 !important; color: #000 !important; text-shadow: none !important; z-index: 5; }
 
         .card-footer { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-radius: 0 0 12px 12px; font-weight: bold; font-size: 1rem; border: 3px solid #000; border-top: none; }
         .btn-card-action { width: auto; min-width: 90px; color: #333; border: 2px solid white; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: 'Titan One'; font-size: 0.9rem; text-transform: uppercase; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
@@ -104,6 +104,7 @@
     <div id="info-modal" class="modal-overlay">
         <div class="modal-content">
             <h2>OFFICIAL CALL LIST</h2>
+            <p style="font-size:0.8rem; color:#666; margin-bottom:15px;">Only these events can be auto-detected from the Game Feed.</p>
             <div id="info-list"></div>
             <button onclick="document.getElementById('info-modal').style.display='none'" style="width:100%; background:#333; color:white; padding:15px; border:none; border-radius:10px; margin-top:10px; cursor:pointer;">CLOSE</button>
         </div>
@@ -113,11 +114,16 @@
     <div id="lobby">
         <div class="lobby-card">
             <h1>NFL BEANO</h1>
-            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 19.0 &bull; HIVE MIND</p>
+            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 21.1 &bull; UNIFIED TEAMS</p>
 
             <div class="lobby-tabs">
                 <button class="tab-btn active" id="tab-host" onclick="switchTab('host')">HOST</button>
                 <button class="tab-btn" id="tab-join" onclick="switchTab('join')">JOIN</button>
+            </div>
+            
+            <div class="warning-text">
+                <strong>CONNECTION ISSUES?</strong><br>
+                Please turn off AdBlockers and disconnect VPNs. They block the live game feed connection.
             </div>
 
             <!-- SHARED INPUTS (Revealed based on flow) -->
@@ -136,6 +142,7 @@
                 <div class="control-group">
                     <label>Your Team</label>
                     <select id="lobby-team"></select>
+                    <div style="font-size:0.7rem; color:#666; margin-top:2px;">(Just for fun & confetti!)</div>
                 </div>
                 
                 <div class="control-group" id="feed-group">
@@ -177,27 +184,43 @@
             <select id="ingame-team" onchange="updateTeam()" style="padding:5px; border:1px solid #ccc; width:auto; font-size:0.8rem; height:32px;"></select>
         </div>
         <div style="display:flex; gap:5px;">
+            <button class="btn-footer" id="host-test-btn" onclick="testConfetti()" style="display:none; background:#d946ef;">TEST CONFETTI</button>
             <button class="btn-footer" onclick="showInfo()">RULES</button>
             <button id="toggle-view-btn" class="btn-footer" onclick="toggleFocusMode()">HIDE OTHERS</button>
             <button id="reset-btn" class="btn-footer" onclick="resetAll()" style="background:#ef4444; color:white; display:none;">RESET</button>
         </div>
     </div>
+
     <div id="celebration"></div>
 
 <script>
     const TIERS = {
-        common: { label: "COMMON (12)", color: "#10b981", items: ["FIRST DOWN", "PUNT", "TIMEOUT", "PENALTY FLAG", "INC. PASS", "RUN 5-9 YDS", "PASS 5-9 YDS", "KICKOFF", "TOUCHBACK", "SACK", "RUN 10-19 YDS", "PASS 10-19 YDS"] },
-        uncommon: { label: "UNCOMMON (8)", color: "#f59e0b", items: ["TOUCHDOWN", "FIELD GOAL", "TURNOVER", "INTERCEPTION", "FUMBLE", "4TH DOWN TRY", "RUN 20-39 YDS", "PASS 20-39 YDS", "TFL 1-9 YDS", "REVIEW", "RETURN 10-19 YDS", "HOLDING", "FALSE START", "OFFSIDES", "PASS INT", "SHOTGUN", "FAIR CATCH"] },
-        rare: { label: "RARE (4)", color: "#ef4444", items: ["MISSED FG", "2-PT CONV", "SAFETY", "BLOCKED KICK", "DEFENSIVE TD", "INJURY", "OVERTIME", "RUN 40+ YDS", "PASS 40+ YDS", "RETURN 20+ YDS", "SACK 10+ YD LOSS", "ROUGHING PASSER", "ROUGHING KICKER", "TAUNTING", "SPIKE", "KNEEL", "NO HUDDLE"] }
+        common: { 
+            label: "COMMON (12)", color: "#10b981", 
+            items: ["RUN 1-4 YDS", "PASS 1-4 YDS", "RETURN 1-9 YDS", "INC. PASS", "PUNT", "KICKOFF", "TOUCHBACK", "TIMEOUT", "PENALTY FLAG", "FALSE START", "OFFSIDES", "SACK"] 
+        },
+        uncommon: { 
+            label: "UNCOMMON (8)", color: "#f59e0b", 
+            items: ["RUN 5-9 YDS", "PASS 5-9 YDS", "RUN 10-19 YDS", "PASS 10-19 YDS", "RETURN 10-19 YDS", "HOLDING", "PASS INT", "TOUCHDOWN", "FIELD GOAL", "INTERCEPTION", "FUMBLE", "TURNOVER", "4TH DOWN TRY", "TFL 1-9 YDS", "REVIEW", "SHOTGUN"] 
+        },
+        rare: { 
+            label: "RARE (4)", color: "#ef4444", 
+            items: ["RUN 20+ YDS", "PASS 20+ YDS", "RETURN 20+ YDS", "DEFENSIVE TD", "SAFETY", "BLOCKED KICK", "MISSED FG", "INJURY", "OVERTIME", "TAUNTING", "ROUGHING PASSER"] 
+        }
     };
     
-    // FULL TEAM DATASET (CFL Added, exact filenames)
+    // FULL TEAM DATASET
     const TEAMS = {
         "None": { n: "No Team", c: "#333", l: "nfl.svg" },
         "ARI": { n: "Arizona Cardinals", c: "#97233F", l: "arizona-cardinals.svg" },
         "ATL": { n: "Atlanta Falcons", c: "#A71930", l: "atlanta-falcons.svg" },
+        "SCH": { n: "Atlantic Schooners", c: "#1C2E4A", l: "atlantic-schooners.png" },
         "BAL": { n: "Baltimore Ravens", c: "#241773", l: "baltimore-ravens.svg" },
+        "BALC": { n: "Baltimore Stallions", c: "#002D62", l: "baltimore-stallions.png" },
+        "BCL": { n: "BC Lions", c: "#F15623", l: "bc-lions.png" },
+        "BIR": { n: "Birmingham Barracudas", c: "#008080", l: "birmingham-barracudas.png" },
         "BUF": { n: "Buffalo Bills", c: "#00338D", l: "buffalo-bills.svg" },
+        "CAL": { n: "Calgary Stampeders", c: "#CC202C", l: "calgary-stampeders.png" },
         "CAR": { n: "Carolina Panthers", c: "#0085CA", l: "carolina-panthers.svg" },
         "CHI": { n: "Chicago Bears", c: "#0B162A", l: "chicago-bears.svg" },
         "CIN": { n: "Cincinnati Bengals", c: "#FB4F14", l: "cincinnati-bengals.svg" },
@@ -205,45 +228,39 @@
         "DAL": { n: "Dallas Cowboys", c: "#003594", l: "dallas-cowboys.svg" },
         "DEN": { n: "Denver Broncos", c: "#FB4F14", l: "denver-broncos.svg" },
         "DET": { n: "Detroit Lions", c: "#0076B6", l: "detroit-lions.svg" },
+        "EDM": { n: "Edmonton Elks", c: "#2C5234", l: "edmonton-elks.png" },
         "GB": { n: "Green Bay Packers", c: "#203731", l: "green-bay-packers.svg" },
+        "HAM": { n: "Hamilton Tiger-Cats", c: "#FFB81C", l: "hamilton-tigercats.png" },
         "HOU": { n: "Houston Texans", c: "#03202F", l: "houston-texans.svg" },
         "IND": { n: "Indianapolis Colts", c: "#002C5F", l: "indianapolis-colts.svg" },
         "JAX": { n: "Jacksonville Jaguars", c: "#006778", l: "jacksonville-jaguars.svg" },
         "KC": { n: "Kansas City Chiefs", c: "#E31837", l: "kansas-city-chiefs.svg" },
-        "LV": { n: "Las Vegas Raiders", c: "#000", l: "oakland-raiders.svg" }, // Mapped to Oakland file
+        "LVP": { n: "Las Vegas Posse", c: "#000000", l: "las-vegas-posse.png" },
+        "LV": { n: "Las Vegas Raiders", c: "#000", l: "oakland-raiders.svg" },
         "LAC": { n: "Los Angeles Chargers", c: "#0080C6", l: "los-angeles-chargers.svg" },
         "LAR": { n: "Los Angeles Rams", c: "#003594", l: "los-angeles-rams.svg" },
+        "MEM": { n: "Memphis Mad Dogs", c: "#004F34", l: "memphis-maddogs.png" },
         "MIA": { n: "Miami Dolphins", c: "#008E97", l: "miami-dolphins.svg" },
         "MIN": { n: "Minnesota Vikings", c: "#4F2683", l: "minnesota-vikings.svg" },
+        "MTL": { n: "Montreal Alouettes", c: "#002D62", l: "montreal-alouettes.png" },
+        "MCON": { n: "Montreal Concordes", c: "#003399", l: "montreal-concordes.png" },
         "NE": { n: "New England Patriots", c: "#002244", l: "new-england-patriots.svg" },
         "NO": { n: "New Orleans Saints", c: "#D3BC8D", l: "new-orleans-saints.svg" },
         "NYG": { n: "New York Giants", c: "#0B2265", l: "new-york-giants.svg" },
         "NYJ": { n: "New York Jets", c: "#125740", l: "new-york-jets.svg" },
+        "OTT": { n: "Ottawa Redblacks", c: "#000000", l: "ottowa-redblacks.png" },
         "PHI": { n: "Philadelphia Eagles", c: "#004C54", l: "philadelphia-eagles.svg" },
         "PIT": { n: "Pittsburgh Steelers", c: "#FFB612", l: "pittsburgh-steelers.svg" },
-        "SF": { n: "San Francisco 49ers", c: "#AA0000", l: "san-francisco-49ers.svg" },
-        "SEA": { n: "Seattle Seahawks", c: "#002244", l: "seattle-seahawks.svg" },
-        "TB": { n: "Tampa Bay Buccaneers", c: "#D50A0A", l: "tampa-bay-buccaneers.svg" },
-        "TEN": { n: "Tennessee Titans", c: "#0C2340", l: "tennessee-titans.svg" },
-        "WAS": { n: "Washington Commanders", c: "#5A1414", l: "washington-commanders.svg" },
-        // CFL & EXPANSION TEAMS
-        "SCH": { n: "Atlantic Schooners", c: "#1C2E4A", l: "atlantic-schooners.png" },
-        "BALC": { n: "Baltimore Stallions", c: "#002D62", l: "baltimore-stallions.png" },
-        "BCL": { n: "BC Lions", c: "#F15623", l: "bc-lions.png" },
-        "BIR": { n: "Birmingham Barracudas", c: "#008080", l: "birmingham-barracudas.png" },
-        "CAL": { n: "Calgary Stampeders", c: "#CC202C", l: "calgary-stampeders.png" },
-        "EDM": { n: "Edmonton Elks", c: "#2C5234", l: "edmonton-elks.png" },
-        "HAM": { n: "Hamilton Tiger-Cats", c: "#FFB81C", l: "hamilton-tigercats.png" },
-        "LVP": { n: "Las Vegas Posse", c: "#000000", l: "las-vegas-posse.png" },
-        "MEM": { n: "Memphis Mad Dogs", c: "#004F34", l: "memphis-maddogs.png" },
-        "MTL": { n: "Montreal Alouettes", c: "#002D62", l: "montreal-alouettes.png" },
-        "MCON": { n: "Montreal Concordes", c: "#003399", l: "montreal-concordes.png" },
-        "OTT": { n: "Ottawa Redblacks", c: "#000000", l: "ottowa-redblacks.png" },
         "SAC": { n: "Sacramento Gold Miners", c: "#008080", l: "sacramento-goldminers.png" },
         "SAT": { n: "San Antonio Texans", c: "#006778", l: "san-antonio-texans.png" },
+        "SF": { n: "San Francisco 49ers", c: "#AA0000", l: "san-francisco-49ers.svg" },
         "SAS": { n: "Saskatchewan Roughriders", c: "#006341", l: "saskatchewan-roughriders.png" },
+        "SEA": { n: "Seattle Seahawks", c: "#002244", l: "seattle-seahawks.svg" },
         "SHR": { n: "Shreveport Pirates", c: "#4B0082", l: "shreveport-pirates.png" },
+        "TB": { n: "Tampa Bay Buccaneers", c: "#D50A0A", l: "tampa-bay-buccaneers.svg" },
+        "TEN": { n: "Tennessee Titans", c: "#0C2340", l: "tennessee-titans.svg" },
         "TOR": { n: "Toronto Argonauts", c: "#00205B", l: "toronto-argonauts.png" },
+        "WAS": { n: "Washington Commanders", c: "#5A1414", l: "washington-commanders.svg" },
         "WPG": { n: "Winnipeg Blue Bombers", c: "#003594", l: "winnipeg-bluebombers.png" }
     };
     
@@ -252,7 +269,7 @@
 
     const WINS = [[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],[0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],[0,6,12,18,24],[4,8,12,16,20]];
     const BROKER = 'wss://broker.emqx.io:8084/mqtt';
-    const TOPIC_PRE = 'nfl_beano_v18_0';
+    const TOPIC_PRE = 'nfl_beano_v21_1';
 
     let client, myId = 'p' + Math.random().toString(36).substr(2,6);
     let myName, myTeam, roomCode, isHost = true; 
@@ -294,14 +311,23 @@
                 setup.style.display = 'block';
                 hostCode.style.display = 'block';
                 feedGroup.style.display = 'block';
+                
                 roomIn.value = Math.random().toString(36).substr(2,4).toUpperCase();
                 roomIn.disabled = true;
-                btn.style.display = 'block'; btn.className = 'lobby-btn btn-host'; btn.innerText = 'START GAME'; btn.onclick = () => initGame(true);
+                
+                btn.style.display = 'block';
+                btn.className = 'lobby-btn btn-host'; 
+                btn.innerText = 'START GAME'; 
+                btn.onclick = () => initGame(true);
+                
                 checkHostReady(); 
             } else {
                 isHost = false;
-                setup.style.display = 'none'; hostCode.style.display = 'none'; feedGroup.style.display = 'none'; 
-                btn.style.display = 'none'; join1.style.display = 'block'; 
+                setup.style.display = 'none';
+                hostCode.style.display = 'none';
+                feedGroup.style.display = 'none'; 
+                btn.style.display = 'none'; 
+                join1.style.display = 'block'; 
             }
         };
         switchTab('host');
@@ -313,7 +339,7 @@
         document.getElementById('room-input').value = code;
         document.getElementById('join-step-1').style.display = 'none';
         document.getElementById('setup-area').style.display = 'block';
-        document.getElementById('feed-group').style.display = 'block'; // UNHIDDEN FOR JOINERS (Hive Mind)
+        document.getElementById('feed-group').style.display = 'block'; 
         document.getElementById('code-group').style.display = 'none'; 
         const btn = document.getElementById('action-btn');
         btn.style.display = 'block'; btn.className = 'lobby-btn btn-join'; btn.innerText = 'JOIN GAME'; btn.disabled = false; btn.onclick = () => initGame(false);
@@ -326,7 +352,6 @@
             const data = await resp.json();
             sel.innerHTML = `<option value="" selected>None / Watch Party</option>`;
             
-            // CLASSICS
             sel.innerHTML += `<optgroup label="SUPER BOWL CLASSICS">
                 <option value="401547660">SB 58: Chiefs vs 49ers</option>
                 <option value="401131047">SB 54: Chiefs vs 49ers</option>
@@ -372,7 +397,7 @@
             gameState.activeGameIds = [myGameId];
         } else {
             roomCode = document.getElementById('room-input').value;
-            myGameId = document.getElementById('game-selector').value; // Joiner Choice
+            myGameId = document.getElementById('game-selector').value;
         }
 
         gameState.players[myId] = createPlayerData(myName, myTeam);
@@ -381,7 +406,10 @@
         document.getElementById('feed-container').classList.remove('hidden');
         document.getElementById('footer-controls').classList.remove('hidden');
         document.getElementById('room-label').innerText = roomCode;
-        if(isHost) document.getElementById('reset-btn').style.display = 'block';
+        if(isHost) {
+            document.getElementById('reset-btn').style.display = 'block';
+            document.getElementById('host-test-btn').style.display = 'block'; 
+        }
         document.getElementById('ingame-team').value = myTeam;
         
         render(); 
@@ -399,7 +427,6 @@
         return { events: pool, marked: [12], winLine: [], rerolls: 2 };
     }
 
-    // --- HIVE MIND LOOP ---
     function startHostLoop() {
         setInterval(() => {
             gameState.activeGameIds.forEach(gid => {
@@ -419,7 +446,6 @@
             const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
             const data = await resp.json();
             
-            // Scoreboard (Simplified Replay Header)
             if(data.header) {
                  const hAbbr = TEAM_IDS[data.boxscore.teams[0].team.id] || "NFL";
                  const aAbbr = TEAM_IDS[data.boxscore.teams[1].team.id] || "NFL";
@@ -443,7 +469,6 @@
                 
                 const hAbbr = TEAM_IDS[data.boxscore.teams[0].team.id] || "NFL";
                 const aAbbr = TEAM_IDS[data.boxscore.teams[1].team.id] || "NFL";
-                
                 let bgCol = TEAMS[hAbbr]?.c || "#333";
                 
                 const payload = { 
@@ -471,7 +496,6 @@
             const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
             const data = await resp.json();
             
-            // Scoreboard
             if(data.header) {
                 const comps = data.header.competitions[0].competitors;
                 const hAbbr = TEAM_IDS[comps[0].team.id] || "NFL"; 
@@ -484,7 +508,6 @@
                 updateScoreboard({ gid: gid, html: scoreText });
             }
 
-            // Play Logic
             let lastPlay = null;
             if(data.drives?.current?.plays?.length > 0) {
                 lastPlay = data.drives.current.plays[data.drives.current.plays.length - 1];
@@ -500,14 +523,7 @@
                 const aAbbr = TEAM_IDS[data.boxscore.teams[1].team.id] || "NFL";
                 const bgCol = TEAMS[hAbbr]?.c || "#333";
 
-                const payload = { 
-                    type: 'FEED_ITEM', 
-                    events: analyzed, 
-                    text: lastPlay.text, 
-                    bg: bgCol,
-                    t1: hAbbr, t2: aAbbr, 
-                    calls: gameState.calls 
-                };
+                const payload = { type: 'FEED_ITEM', events: analyzed, text: lastPlay.text, bg: bgCol, t1: hAbbr, t2: aAbbr, calls: gameState.calls };
                 
                 if(analyzed.length > 0) {
                     analyzed.forEach(evt => { if(!gameState.calls.includes(evt)) gameState.calls.push(evt); });
@@ -549,32 +565,33 @@
         if(up.includes("TAUNTING")) events.push("TAUNTING");
         if(up.includes("SHOTGUN") || up.includes("(SHOTGUN)")) events.push("SHOTGUN");
         if(up.includes("FAIR CATCH")) events.push("FAIR CATCH");
-        
-        // NEW FIX
-        if(up.includes("1ST DOWN") || up.includes("1ST &")) events.push("FIRST DOWN");
 
         const distMatch = up.match(/(\d+) (YD|YARD|YDS)/);
         if(distMatch) {
             const yds = parseInt(distMatch[1]);
             const isPass = up.includes("PASS") || up.includes("COMPLETE") || up.includes("THROWN");
             const isKick = up.includes("KICK") || up.includes("PUNT");
-            if(!isPass && !isKick) {
-                if(yds >= 5 && yds <= 9) events.push("RUN 5-9 YDS");
-                else if(yds >= 10 && yds <= 19) events.push("RUN 10-19 YDS");
-                else if(yds >= 20 && yds <= 39) events.push("RUN 20-39 YDS");
-                else if(yds >= 40) events.push("RUN 40+ YDS");
-                if(yds < 0 && yds > -10) events.push("TFL 1-9 YDS");
-            }
-            if(isPass) {
-                if(yds >= 5 && yds <= 9) events.push("PASS 5-9 YDS");
-                else if(yds >= 10 && yds <= 19) events.push("PASS 10-19 YDS");
-                else if(yds >= 20 && yds <= 39) events.push("PASS 20-39 YDS");
-                else if(yds >= 40) events.push("PASS 40+ YDS");
-            }
+            
+            if(yds >= 1 && yds <= 4 && !isPass && !isKick) events.push("RUN 1-4 YDS");
+            if(yds >= 5 && yds <= 9 && !isPass && !isKick) events.push("RUN 5-9 YDS");
+            if(yds >= 10 && yds <= 19 && !isPass && !isKick) events.push("RUN 10-19 YDS");
+            if(yds >= 20 && yds <= 39 && !isPass && !isKick) events.push("RUN 20-39 YDS");
+            if(yds >= 40 && !isPass && !isKick) events.push("RUN 40+ YDS");
+            
+            if(yds >= 1 && yds <= 4 && isPass) events.push("PASS 1-4 YDS");
+            if(yds >= 5 && yds <= 9 && isPass) events.push("PASS 5-9 YDS");
+            if(yds >= 10 && yds <= 19 && isPass) events.push("PASS 10-19 YDS");
+            if(yds >= 20 && yds <= 39 && isPass) events.push("PASS 20-39 YDS");
+            if(yds >= 40 && isPass) events.push("PASS 40+ YDS");
+
             if(isKick && (up.includes("RETURN") || !up.includes("TOUCHBACK"))) {
+                if(yds >= 1 && yds <= 9) events.push("RETURN 1-9 YDS");
                 if(yds >= 10 && yds <= 19) events.push("RETURN 10-19 YDS");
-                else if(yds >= 20) events.push("RETURN 20+ YDS");
+                if(yds >= 20) events.push("RETURN 20+ YDS");
             }
+            
+            // FIXED FIRST DOWN
+            if(yds >= 10 && !isKick) events.push("FIRST DOWN");
         }
         return events;
     }
@@ -645,7 +662,12 @@
                 
                 if(idx===12) { classes += " free"; styleAttr = `style="background-color:${tData.c} !important;"`; }
                 else if(c.marked.includes(idx)) { styleAttr = `style="background-color:${tData.c} !important; color:white !important; text-shadow:0 1px 2px rgba(0,0,0,0.8);"`; }
-                if(c.winLine.includes(idx)) classes += " win";
+                
+                // HIGHLIGHTER WIN
+                if(c.winLine.includes(idx)) {
+                    classes += " win";
+                    styleAttr = `style="background-color:#fbbf24 !important; color:black !important; text-shadow:none !important;"`;
+                }
                 
                 let content = evt;
                 if(idx===12) content = `<div style="background:white; border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; margin:0 auto; box-shadow:0 2px 5px rgba(0,0,0,0.3);"><img src="logos/${tData.l}" style="width:28px; height:28px; object-fit:contain;"></div>`;
@@ -667,7 +689,9 @@
 
     window.cellClick = function(pid, cIdx, idx) {
         let p = gameState.players[myId]; let c = p.cards[0];
+        
         if(!gameState.calls.includes(c.events[idx])) return; 
+
         if(c.marked.includes(idx)) c.marked = c.marked.filter(x=>x!==idx); else c.marked.push(idx);
         c.winLine = []; for(let l of WINS) if(l.every(x => c.marked.includes(x))) c.winLine = l;
         
@@ -676,9 +700,18 @@
             if(matches.length === 4) {
                 let missing = line.find(x => !c.marked.includes(x));
                 let evt = c.events[missing];
-                if(evt !== "FREE") send({ type: 'FEED_ITEM', hunt: true, text: `${myName} NEEDS A ${evt}` });
+                if(evt !== "FREE") {
+                    send({ type: 'FEED_ITEM', hunt: true, text: `${myName} NEEDS A ${evt}` });
+                }
             }
         });
+        
+        // CRITICAL FIX: Host Checks Win Immediately (Bypass network echo)
+        if(isHost && c.winLine.length > 0) {
+            currentWinnerName = myName;
+            triggerWin(myName);
+        }
+
         render(); send({ type: 'UPDATE', pData: p });
     };
 
@@ -692,7 +725,22 @@
 
     window.updateTeam = function() { let t = document.getElementById('ingame-team').value; if(gameState.players[myId]) { gameState.players[myId].team = t; render(); send({ type: 'UPDATE_TEAM', team: t }); } }
     window.toggleFocusMode = function() { focusMode = !focusMode; document.getElementById('toggle-view-btn').innerText = focusMode?"SHOW OTHERS":"HIDE OTHERS"; render(); }
-    window.showInfo = function() { let h = ""; for(let k in TIERS) h += `<div class="tier-list"><div class="tier-head" style="background:${TIERS[k].color}"><span>${TIERS[k].label}</span></div><div class="tier-items">${TIERS[k].items.join(", ")}</div></div>`; document.getElementById('info-list').innerHTML = h; document.getElementById('info-modal').style.display='flex'; }
+    
+    window.showInfo = function() { 
+        let h = `<div style="padding-bottom:10px; border-bottom:1px solid #ccc; margin-bottom:10px;">
+                    <h3>HOW TO PLAY</h3>
+                    <ul style="text-align:left; font-size:0.8rem; padding-left:20px;">
+                        <li><strong>GOAL:</strong> 5 in a row (Any Direction).</li>
+                        <li><strong>LOCKOUT:</strong> Squares are LOCKED until the event appears in the Official Board.</li>
+                        <li><strong>REROLLS:</strong> You have 2 rerolls. Use them wisely!</li>
+                    </ul>
+                </div><h3>EVENT ODDS</h3>`; 
+        for(let k in TIERS) h += `<div class="tier-list"><div class="tier-head" style="background:${TIERS[k].color}"><span>${TIERS[k].label}</span></div><div class="tier-items">${TIERS[k].items.join(", ")}</div></div>`; 
+        document.getElementById('info-list').innerHTML = h; document.getElementById('info-modal').style.display='flex'; 
+    }
+    
+    window.testConfetti = function() { celebrate(myName); }
+
     window.resetAll = function() { if(!isHost) return; if(confirm("New Cards for EVERYONE?")) { 
         gameState.calls = []; 
         Object.keys(gameState.players).forEach(pid => { let p = gameState.players[pid]; gameState.players[pid] = createPlayerData(p.name, p.team, p.gameId); }); 
@@ -700,17 +748,17 @@
         render(); send({ type: 'STATE', state: gameState }); 
     }}
     
-    // NEW CONFETTI TRIGGER (Uses explicit message)
     function triggerWin(name) {
         send({ type: 'WINNER_DECLARED', name: name });
-        // Host also celebrates locally
         celebrate(name);
         document.getElementById('winner-text').innerText = name + " WINS!"; 
         document.getElementById('winner-modal').style.display = 'block';
     }
 
     function celebrate(winnerName) { 
-        const b = document.getElementById('celebration'); if(b.childElementCount > 5) return; 
+        const b = document.getElementById('celebration');
+        // FORCE CLEAR
+        b.innerHTML = ''; 
         
         let logoSrc = null;
         Object.values(gameState.players).forEach(p => { 
@@ -722,8 +770,6 @@
 
         for(let i=0; i<60; i++){ 
             let type = Math.random() > 0.5 ? 'football' : 'logo';
-            
-            // SAFE MODE: If no logo found, force football
             if(type === 'logo' && !logoSrc) type = 'football';
 
             let f = document.createElement(type === 'football' ? 'div' : 'img');
@@ -740,7 +786,6 @@
     }
 
     function checkGlobalWin() {
-        // ONLY HOST CHECKS MATH
         let winnerFound = null;
         Object.values(gameState.players).forEach(p => { if(p.cards.some(c => c.winLine.length > 0)) winnerFound = p.name; });
         
@@ -802,7 +847,7 @@
                     if(msg.type === 'STATE') {
                         let local = gameState.players[myId]; gameState = msg.state;
                         if(local && gameState.players[myId] && JSON.stringify(local.cards[0].events) === JSON.stringify(gameState.players[myId].cards[0].events)) gameState.players[myId] = local;
-                        // GUESTS DO NOT CHECK WIN, THEY WAIT FOR SIGNAL
+                        // GUESTS DO NOT CHECK WIN
                         render();
                     }
                 }
