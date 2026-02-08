@@ -1,22 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
 <!-- 
-    NFL BEANO v21.1
-    - DATA: Normalized Team Names (Full City + Name for everyone).
-    - UI: Team Dropdown is now perfectly consistent.
-    - CORE: Same stable v21.0 logic (Highlighter Win, Exclusive Buckets, etc).
+    NFL BEANO v23.0
+    - FEATURE: Kick Player. Host sees "X" button on opponent cards.
+    - LOGIC: Added 'KICKED' message type to MQTT to force-reload the victim.
+    - CORE: Retains all v22.2 logic (Replay, Hive Mind, Confetti, etc).
 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFL BEANO v21.1</title>
+    <title>NFL BEANO v23.0</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Titan+One&display=swap" rel="stylesheet">
 
     <style>
         :root { --bg-color: #0f172a; --card-width: 360px; }
         * { box-sizing: border-box; }
-        body { margin: 0; padding: 0; background: var(--bg-color); color: white; font-family: 'Chakra Petch', sans-serif; overflow-x: hidden; transition: background-color 0.5s ease; padding-bottom: 120px; }
+        body { margin: 0; padding: 0; background: var(--bg-color); color: white; font-family: 'Chakra Petch', sans-serif; overflow-x: hidden; transition: background-color 0.5s ease; padding-bottom: 90px; }
 
         /* LOBBY */
         #lobby { position: fixed; inset: 0; z-index: 9999; background: rgba(15, 23, 42, 0.98); display: flex; justify-content: center; align-items: center; overflow-y: auto; }
@@ -26,6 +26,7 @@
         .tab-btn { flex: 1; padding: 8px; border: none; background: transparent; font-family: 'Titan One'; font-size: 1.1rem; cursor: pointer; color: #64748b; border-radius: 8px; }
         .tab-btn.active { background: white; color: #3b82f6; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         .control-group { margin: 12px 0; text-align: left; }
+        .row-group { display: flex; gap: 10px; }
         label { display: block; font-weight: bold; margin-bottom: 4px; text-transform: uppercase; font-size: 0.7rem; color: #666; letter-spacing: 1px; }
         input, select { width: 100%; padding: 10px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 1rem; font-weight: bold; font-family: 'Chakra Petch', sans-serif; outline: none; }
         .lobby-btn { width: 100%; padding: 15px; font-size: 1.3rem; font-family: 'Titan One', cursive; border: none; border-radius: 10px; cursor: pointer; transition: transform 0.1s; margin-top: 10px; }
@@ -33,7 +34,11 @@
         .lobby-btn:disabled { background: #94a3b8; cursor: not-allowed; opacity: 0.7; }
         .btn-host { background: #3b82f6; color: white; }
         .btn-join { background: #10b981; color: white; }
-        .warning-text { font-size: 0.75rem; color: #ef4444; background: #fee2e2; padding: 8px; border-radius: 6px; margin-top: 15px; text-align: left; border-left: 4px solid #ef4444; line-height: 1.3; }
+        
+        details { text-align: center; margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 15px; font-size: 0.75rem; color: #94a3b8; cursor: pointer; }
+        summary { font-weight: bold; outline: none; list-style: none; }
+        summary::-webkit-details-marker { display: none; }
+        details p { margin: 5px 0 0 0; color: #64748b; line-height: 1.4; }
 
         /* FEED */
         #feed-container { width: 95%; max-width: 900px; margin: 10px auto 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border-radius: 12px; overflow: hidden; background: #1e293b; border: 2px solid #334155; display: flex; flex-direction: column; }
@@ -48,19 +53,21 @@
         .feed-logo { width: 32px; height: 32px; min-width: 32px; object-fit: contain; background: white; border-radius: 50%; padding: 2px; border: 2px solid rgba(255,255,255,0.5); flex-shrink: 0; }
         .feed-text-bubble { background: white; color: #333; padding: 8px 12px; border-radius: 12px; font-size: 0.8rem; line-height: 1.2; font-weight: 700; flex: 1; min-width: 0; word-wrap: break-word; overflow-wrap: break-word; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         .live-item.hunt .feed-text-bubble { background: #fef08a; border: 2px solid #eab308; }
+        .live-item.sys .feed-text-bubble { background: #dbeafe; color: #1e40af; border: 2px solid #93c5fd; font-style: italic; }
         .call-item { background: #10b981; color: #064e3b; padding: 6px; margin-bottom: 4px; border-radius: 4px; font-size: 0.75rem; font-weight: 800; text-align: center; text-transform: uppercase; animation: flashIn 0.5s; }
         @keyframes flashIn { from { transform: scale(0.1); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
         /* GAME BOARD */
         #game-board { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; padding: 40px 10px 80px 10px; gap: 40px; width: 100%; min-height: 100vh; }
-        .player-zone { background: #fff; border-radius: 20px; padding: 20px; display: flex; flex-direction: column; align-items: center; border: 8px solid #333; box-shadow: 0 15px 40px rgba(0,0,0,0.6); position: relative; margin-top: 60px; width: auto; min-height: 400px; }
+        .player-zone { background: #fff; border-radius: 20px; padding: 20px; display: flex; flex-direction: column; align-items: center; border: 8px solid #333; box-shadow: 0 15px 40px rgba(0,0,0,0.6); position: relative; margin-top: 60px; width: auto; max-width: 100%; min-height: 400px; }
         .player-header { margin-top: -80px; display: flex; flex-direction: column; align-items: center; margin-bottom: 15px; z-index: 10; }
         .team-logo-wrap { width: 100px; height: 100px; background: white; border-radius: 50%; border: 5px solid white; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; justify-content: center; align-items: center; z-index: 2; }
         .team-logo { width: 70px; height: 70px; object-fit: contain; }
         .player-name { font-family: 'Titan One', cursive; font-size: 1.8rem; text-transform: uppercase; color: white; padding: 8px 25px 5px 25px; border-radius: 30px; border: 4px solid white; margin-top: -20px; z-index: 1; text-shadow: 2px 2px 0 rgba(0,0,0,0.3); white-space: nowrap; }
+        .cards-row { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; }
 
         /* GRID */
-        .single-card-wrap { width: var(--card-width); }
+        .single-card-wrap { width: var(--card-width); display: flex; flex-direction: column; }
         .bingo-grid-container { background: #000; border-radius: 12px 12px 0 0; overflow: hidden; border: 3px solid #000; border-bottom: none; }
         .card-label { text-align: center; padding: 6px; font-weight: 900; color: white; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 2px; }
         .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; background: #94a3b8; }
@@ -68,13 +75,24 @@
         .cell.free { background: #1e293b !important; display: flex; align-items: center; justify-content: center; }
         .cell.unlocked { cursor: pointer; }
         .cell.unlocked:active { background: #cbd5e1; }
-        /* HIGHLIGHTER WIN STYLE */
+        /* MARKED / WIN */
         .cell.marked { color: white !important; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
         .cell.win { background-color: #fbbf24 !important; color: #000 !important; text-shadow: none !important; z-index: 5; }
 
         .card-footer { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-radius: 0 0 12px 12px; font-weight: bold; font-size: 1rem; border: 3px solid #000; border-top: none; }
         .btn-card-action { width: auto; min-width: 90px; color: #333; border: 2px solid white; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: 'Titan One'; font-size: 0.9rem; text-transform: uppercase; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
         .btn-use { color: #d946ef; } .btn-use:disabled { background: #ccc; color: #666; cursor: default; }
+
+        /* KICK BUTTON */
+        .btn-kick {
+            position: absolute; top: 10px; right: 10px;
+            background: #ef4444; color: white; border: 2px solid white;
+            width: 30px; height: 30px; border-radius: 50%;
+            font-weight: bold; cursor: pointer; z-index: 20;
+            display: flex; align-items: center; justify-content: center;
+            font-family: Arial, sans-serif;
+        }
+        .btn-kick:hover { background: #b91c1c; }
 
         #footer-controls { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); background: white; padding: 8px 20px; border-radius: 50px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; gap: 10px; width: 90%; max-width: 600px; justify-content: space-between; z-index: 1000; }
         .btn-footer { padding: 6px 14px; font-size: 0.9rem; border-radius: 20px; background: #64748b; color: white; border: none; font-weight: 800; font-family: 'Chakra Petch'; cursor: pointer; }
@@ -104,7 +122,6 @@
     <div id="info-modal" class="modal-overlay">
         <div class="modal-content">
             <h2>OFFICIAL CALL LIST</h2>
-            <p style="font-size:0.8rem; color:#666; margin-bottom:15px;">Only these events can be auto-detected from the Game Feed.</p>
             <div id="info-list"></div>
             <button onclick="document.getElementById('info-modal').style.display='none'" style="width:100%; background:#333; color:white; padding:15px; border:none; border-radius:10px; margin-top:10px; cursor:pointer;">CLOSE</button>
         </div>
@@ -114,19 +131,14 @@
     <div id="lobby">
         <div class="lobby-card">
             <h1>NFL BEANO</h1>
-            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 21.1 &bull; UNIFIED TEAMS</p>
+            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 23.0 &bull; KICK BUTTON</p>
 
             <div class="lobby-tabs">
                 <button class="tab-btn active" id="tab-host" onclick="switchTab('host')">HOST</button>
                 <button class="tab-btn" id="tab-join" onclick="switchTab('join')">JOIN</button>
             </div>
-            
-            <div class="warning-text">
-                <strong>CONNECTION ISSUES?</strong><br>
-                Please turn off AdBlockers and disconnect VPNs. They block the live game feed connection.
-            </div>
 
-            <!-- SHARED INPUTS (Revealed based on flow) -->
+            <!-- SHARED INPUTS -->
             <div id="join-step-1" class="control-group" style="display:none;">
                  <label>Room Code (Ask Host)</label>
                  <input type="text" id="room-input-join" placeholder="4 LETTERS" style="text-transform:uppercase; text-align:center; font-size:1.5rem; letter-spacing:5px;">
@@ -147,10 +159,43 @@
                 
                 <div class="control-group" id="feed-group">
                     <label id="feed-lbl">Game Feed (Host Required)</label>
-                    <select id="game-selector" onchange="checkHostReady()">
-                        <option value="" disabled selected>Loading Schedule...</option>
-                    </select>
-                    <div id="no-games-msg" style="color:red; display:none; font-size:0.8rem;">No active games found.</div>
+                    <select id="game-selector" onchange="fetchAbbrs()"></select>
+                </div>
+
+                <!-- GAME SETTINGS -->
+                <div id="host-settings" style="display:none;">
+                    <div class="row-group">
+                        <div class="control-group" style="flex:2;">
+                            <label>Game Mode</label>
+                            <select id="game-mode-select" onchange="checkMode()">
+                                <option value="CLASSIC" selected>CLASSIC (Line)</option>
+                                <option value="COVERALL">COVERALL (Full Card)</option>
+                                <option value="LETTERS">LETTERS (H, T, X...)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="control-group" id="letter-group" style="flex:1; display:none;">
+                            <label>Letter</label>
+                            <select id="letter-select">
+                                <option value="RND">Rnd</option>
+                                <option value="H">H</option>
+                                <option value="T">T</option>
+                                <option value="X">X</option>
+                                <option value="N">N</option>
+                                <option value="Z">Z</option>
+                                <option value="O">O</option>
+                            </select>
+                        </div>
+
+                        <div class="control-group" style="flex:1;">
+                            <label>Cards</label>
+                            <select id="card-count-select">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3" selected>3</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="control-group" id="code-group">
@@ -160,6 +205,11 @@
 
                 <button id="action-btn" class="lobby-btn btn-host" onclick="initGame()">START GAME</button>
             </div>
+
+            <details>
+                <summary>CONNECTION ISSUES?</summary>
+                <p>If the game feed isn't loading, please turn off AdBlockers or VPNs. The ESPN feed connection is often blocked by privacy tools.</p>
+            </details>
             
         </div>
     </div>
@@ -181,6 +231,7 @@
     <div id="footer-controls" class="hidden">
         <div class="footer-left">
             <span id="room-label" style="color:#333; font-weight:900;"></span>
+            <span id="mode-label" style="font-size:0.7rem; color:#666; margin-left:5px; border:1px solid #ccc; padding:2px 5px; border-radius:4px;"></span>
             <select id="ingame-team" onchange="updateTeam()" style="padding:5px; border:1px solid #ccc; width:auto; font-size:0.8rem; height:32px;"></select>
         </div>
         <div style="display:flex; gap:5px;">
@@ -194,22 +245,49 @@
     <div id="celebration"></div>
 
 <script>
+    // DATASET
     const TIERS = {
         common: { 
-            label: "COMMON (12)", color: "#10b981", 
-            items: ["RUN 1-4 YDS", "PASS 1-4 YDS", "RETURN 1-9 YDS", "INC. PASS", "PUNT", "KICKOFF", "TOUCHBACK", "TIMEOUT", "PENALTY FLAG", "FALSE START", "OFFSIDES", "SACK"] 
+            label: "COMMON", color: "#10b981", 
+            items: [
+                {t: "RUN 1-4 YDS"}, {t: "PASS 1-4 YDS"}, {t: "INC. PASS"}, 
+                {t: "PUNT", split:true}, {t: "KICKOFF"}, {t: "TOUCHBACK"}, 
+                {t: "TIMEOUT", split:true}, {t: "PENALTY FLAG"}, {t: "FALSE START"}, 
+                {t: "OFFSIDES"}, {t: "SACK", split:true}, {t: "RETURN 1-9 YDS"}
+            ] 
         },
         uncommon: { 
-            label: "UNCOMMON (8)", color: "#f59e0b", 
-            items: ["RUN 5-9 YDS", "PASS 5-9 YDS", "RUN 10-19 YDS", "PASS 10-19 YDS", "RETURN 10-19 YDS", "HOLDING", "PASS INT", "TOUCHDOWN", "FIELD GOAL", "INTERCEPTION", "FUMBLE", "TURNOVER", "4TH DOWN TRY", "TFL 1-9 YDS", "REVIEW", "SHOTGUN"] 
+            label: "UNCOMMON", color: "#f59e0b", 
+            items: [
+                {t: "RUN 5-9 YDS"}, {t: "PASS 5-9 YDS"}, {t: "RUN 10-19 YDS"}, {t: "PASS 10-19 YDS"}, 
+                {t: "RETURN 10-19 YDS"}, {t: "HOLDING"}, {t: "PASS INT"}, 
+                {t: "TOUCHDOWN", split:true}, {t: "FIELD GOAL", split:true}, 
+                {t: "INTERCEPTION", split:true}, {t: "FUMBLE"}, {t: "TURNOVER", split:true}, 
+                {t: "1ST DOWN"}, {t: "TFL 1-9 YDS"}, {t: "REVIEW"}, {t: "SHOTGUN"}
+            ] 
         },
         rare: { 
-            label: "RARE (4)", color: "#ef4444", 
-            items: ["RUN 20+ YDS", "PASS 20+ YDS", "RETURN 20+ YDS", "DEFENSIVE TD", "SAFETY", "BLOCKED KICK", "MISSED FG", "INJURY", "OVERTIME", "TAUNTING", "ROUGHING PASSER"] 
+            label: "RARE", color: "#ef4444", 
+            items: [
+                {t: "RUN 20+ YDS"}, {t: "PASS 20+ YDS"}, {t: "RETURN 20+ YDS"}, 
+                {t: "DEFENSIVE TD"}, {t: "SAFETY"}, {t: "BLOCKED KICK"}, 
+                {t: "MISSED FG", split:true}, {t: "INJURY"}, {t: "OVERTIME"}, 
+                {t: "TAUNTING"}, {t: "ROUGHING PASSER"}
+            ] 
         }
     };
     
-    // FULL TEAM DATASET
+    // PATTERN DEFINITIONS
+    const LINES = [[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],[0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],[0,6,12,18,24],[4,8,12,16,20]];
+    const LETTERS = {
+        'H': [0,5,10,15,20, 4,9,14,19,24, 11,12,13],
+        'T': [0,1,2,3,4, 2,7,12,17,22],
+        'X': [0,6,12,18,24, 4,8,16,20],
+        'N': [0,5,10,15,20, 6,12,18, 4,9,14,19,24],
+        'Z': [0,1,2,3,4, 8,12,16, 20,21,22,23,24],
+        'O': [0,1,2,3,4, 5,10,15,20, 4,9,14,19,24, 20,21,22,23,24]
+    };
+
     const TEAMS = {
         "None": { n: "No Team", c: "#333", l: "nfl.svg" },
         "ARI": { n: "Arizona Cardinals", c: "#97233F", l: "arizona-cardinals.svg" },
@@ -264,19 +342,17 @@
         "WPG": { n: "Winnipeg Blue Bombers", c: "#003594", l: "winnipeg-bluebombers.png" }
     };
     
-    // Mapped IDs for NFL Games
     const TEAM_IDS = { "22":"ARI", "1":"ATL", "33":"BAL", "2":"BUF", "29":"CAR", "3":"CHI", "4":"CIN", "5":"CLE", "6":"DAL", "7":"DEN", "8":"DET", "9":"GB", "34":"HOU", "11":"IND", "30":"JAX", "12":"KC", "13":"LV", "24":"LAC", "14":"LAR", "15":"MIA", "16":"MIN", "17":"NE", "18":"NO", "19":"NYG", "20":"NYJ", "21":"PHI", "23":"PIT", "25":"SF", "26":"SEA", "27":"TB", "10":"TEN", "28":"WAS" };
-
-    const WINS = [[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],[0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],[0,6,12,18,24],[4,8,12,16,20]];
     const BROKER = 'wss://broker.emqx.io:8084/mqtt';
-    const TOPIC_PRE = 'nfl_beano_v21_1';
+    const TOPIC_PRE = 'nfl_beano_v23_0';
 
     let client, myId = 'p' + Math.random().toString(36).substr(2,6);
     let myName, myTeam, roomCode, isHost = true; 
     let focusMode = false;
     let currentWinnerName = null;
-    let gameState = { players: {}, calls: [], activeGameIds: [] }; 
+    let gameState = { players: {}, calls: [], activeGameIds: [], mode: 'CLASSIC', started: false, targetLetter: null }; 
     let myGameId = null;
+    let hostGameAbbrs = { h: "HOME", a: "AWAY" }; 
     let processedPlays = {}; 
     let seenMessages = new Set();
     let ls, is_sel;
@@ -303,6 +379,7 @@
             const join1 = document.getElementById('join-step-1');
             const hostCode = document.getElementById('code-group');
             const feedGroup = document.getElementById('feed-group');
+            const hostSettings = document.getElementById('host-settings');
             const roomIn = document.getElementById('room-input');
 
             if(mode === 'host') {
@@ -311,6 +388,7 @@
                 setup.style.display = 'block';
                 hostCode.style.display = 'block';
                 feedGroup.style.display = 'block';
+                hostSettings.style.display = 'block';
                 
                 roomIn.value = Math.random().toString(36).substr(2,4).toUpperCase();
                 roomIn.disabled = true;
@@ -326,6 +404,7 @@
                 setup.style.display = 'none';
                 hostCode.style.display = 'none';
                 feedGroup.style.display = 'none'; 
+                hostSettings.style.display = 'none';
                 btn.style.display = 'none'; 
                 join1.style.display = 'block'; 
             }
@@ -333,13 +412,19 @@
         switchTab('host');
     });
 
+    window.checkMode = function() {
+        const m = document.getElementById('game-mode-select').value;
+        const sub = document.getElementById('letter-group');
+        sub.style.display = (m === 'LETTERS') ? 'block' : 'none';
+    };
+
     window.joinNext = function() {
         const code = document.getElementById('room-input-join').value.trim().toUpperCase();
         if(code.length !== 4) return alert("Please enter a 4-letter Room Code.");
         document.getElementById('room-input').value = code;
         document.getElementById('join-step-1').style.display = 'none';
         document.getElementById('setup-area').style.display = 'block';
-        document.getElementById('feed-group').style.display = 'block'; 
+        document.getElementById('feed-group').style.display = 'none'; 
         document.getElementById('code-group').style.display = 'none'; 
         const btn = document.getElementById('action-btn');
         btn.style.display = 'block'; btn.className = 'lobby-btn btn-join'; btn.innerText = 'JOIN GAME'; btn.disabled = false; btn.onclick = () => initGame(false);
@@ -350,12 +435,13 @@
         try {
             const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard');
             const data = await resp.json();
-            sel.innerHTML = `<option value="" selected>None / Watch Party</option>`;
+            sel.innerHTML = `<option value="" disabled selected>Select Game...</option>`;
             
-            sel.innerHTML += `<optgroup label="SUPER BOWL CLASSICS">
-                <option value="401547660">SB 58: Chiefs vs 49ers</option>
-                <option value="401131047">SB 54: Chiefs vs 49ers</option>
-                <option value="400927752">SB 51: Patriots vs Falcons</option>
+            sel.innerHTML += `<optgroup label="CLASSIC GAMES (TESTING)">
+                <option value="401547660">SB 58: KC vs SF</option>
+                <option value="401438012">SB 57: KC vs PHI</option>
+                <option value="401326601">2021 DIV: KC vs BUF</option>
+                <option value="400999173">SB 52: PHI vs NE</option>
             </optgroup>`;
             
             if(data.events) {
@@ -364,12 +450,27 @@
                     const status = e.status.type.state; 
                     const startTime = new Date(e.date);
                     const diffMins = (startTime - now) / 60000;
-                    if (status === 'in' || (status === 'pre' && diffMins <= 30)) {
+                    if (status === 'in' || (status === 'pre' && diffMins <= 60)) {
                         sel.innerHTML += `<option value="${e.id}">${e.name} (${status})</option>`;
                     }
                 });
             }
         } catch(e) { sel.innerHTML = "<option>Error loading games</option>"; }
+    }
+
+    async function fetchAbbrs() {
+        const gid = document.getElementById('game-selector').value;
+        if(!gid) return;
+        try {
+            const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
+            const data = await resp.json();
+            if(data.header) {
+                 const h = TEAM_IDS[data.boxscore.teams[0].team.id] || "HOME";
+                 const a = TEAM_IDS[data.boxscore.teams[1].team.id] || "AWAY";
+                 hostGameAbbrs = { h: h, a: a };
+            }
+            checkHostReady();
+        } catch(e) { console.log("Abbr fetch err", e); }
     }
 
     function checkHostReady() {
@@ -382,7 +483,6 @@
     }
     
     document.getElementById('username').addEventListener('keyup', checkHostReady);
-    document.getElementById('game-selector').addEventListener('change', checkHostReady);
 
     function initGame() {
         const nameInput = document.getElementById('username').value.trim();
@@ -395,42 +495,94 @@
             if(!myGameId) return alert("Host must select a live game feed.");
             roomCode = document.getElementById('room-input').value;
             gameState.activeGameIds = [myGameId];
+            gameState.mode = document.getElementById('game-mode-select').value;
+            gameState.cardsPerPlayer = parseInt(document.getElementById('card-count-select').value);
+            
+            if(gameState.mode === 'LETTERS') {
+                let picked = document.getElementById('letter-select').value;
+                if(picked === 'RND') {
+                    const keys = Object.keys(LETTERS);
+                    picked = keys[Math.floor(Math.random() * keys.length)];
+                }
+                gameState.targetLetter = picked;
+            } else {
+                gameState.targetLetter = null;
+            }
+
+            gameState.started = true;
         } else {
             roomCode = document.getElementById('room-input').value;
-            myGameId = document.getElementById('game-selector').value;
         }
 
-        gameState.players[myId] = createPlayerData(myName, myTeam);
+        if(isHost) {
+            gameState.players[myId] = createPlayerData(myName, myTeam, gameState.cardsPerPlayer, hostGameAbbrs, gameState.targetLetter);
+        }
 
         document.getElementById('lobby').classList.add('hidden');
         document.getElementById('feed-container').classList.remove('hidden');
         document.getElementById('footer-controls').classList.remove('hidden');
         document.getElementById('room-label').innerText = roomCode;
+        document.getElementById('mode-label').innerText = isHost ? gameState.mode : "CONNECTING...";
+        
         if(isHost) {
             document.getElementById('reset-btn').style.display = 'block';
             document.getElementById('host-test-btn').style.display = 'block'; 
         }
         document.getElementById('ingame-team').value = myTeam;
         
-        render(); 
         connectMQTT();
-        
         if(isHost) startHostLoop();
+        render(); 
     }
 
-    function createPlayerData(name, team) { return { name: name, team: team, cards: [newCard()] }; }
+    function createPlayerData(name, team, count, abbrs, fixedLetter) { 
+        let cards = [];
+        for(let i=0; i<count; i++) cards.push(newCard(abbrs, fixedLetter));
+        return { name: name, team: team, cards: cards }; 
+    }
 
-    function newCard() {
-        const shuf = (arr) => [...arr].sort(()=>Math.random()-0.5);
-        const pool = shuf([...shuf(TIERS.common.items).slice(0,12), ...shuf(TIERS.uncommon.items).slice(0,8), ...shuf(TIERS.rare.items).slice(0,4)]);
-        pool.splice(12, 0, "FREE");
-        return { events: pool, marked: [12], winLine: [], rerolls: 2 };
+    function newCard(abbrs, fixedLetter) {
+        let isCoverall = (gameState.mode === 'COVERALL');
+        
+        let pool = [];
+        const processTier = (tierItems, limit) => {
+            let options = [];
+            tierItems.forEach(item => {
+                if(item.split && abbrs) {
+                    options.push(abbrs.h + " " + item.t);
+                    options.push(abbrs.a + " " + item.t);
+                    options.push(item.t);
+                } else {
+                    options.push(item.t);
+                }
+            });
+            options = options.sort(() => Math.random() - 0.5);
+            return options.slice(0, limit);
+        };
+
+        pool = [
+            ...processTier(TIERS.common.items, 12),
+            ...processTier(TIERS.uncommon.items, 8),
+            ...processTier(TIERS.rare.items, 4)
+        ];
+        
+        pool = pool.sort(() => Math.random() - 0.5);
+
+        if(!isCoverall) {
+            pool.splice(12, 0, "FREE");
+        } else {
+            let extra = TIERS.common.items[Math.floor(Math.random()*TIERS.common.items.length)].t;
+            pool.splice(12, 0, extra);
+        }
+
+        let letter = fixedLetter || null;
+        return { events: pool, marked: (!isCoverall ? [12] : []), winLine: [], rerolls: 3, letter: letter };
     }
 
     function startHostLoop() {
         setInterval(() => {
             gameState.activeGameIds.forEach(gid => {
-                if(gid === '401547660' || gid === '401131047' || gid === '400927752') {
+                if(['401547660','401438012','401326601','400999173'].includes(gid)) {
                     if(!processedPlays[gid]) startReplayMode(gid);
                 } else {
                     pollGame(gid);
@@ -446,16 +598,9 @@
             const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
             const data = await resp.json();
             
-            if(data.header) {
-                 const hAbbr = TEAM_IDS[data.boxscore.teams[0].team.id] || "NFL";
-                 const aAbbr = TEAM_IDS[data.boxscore.teams[1].team.id] || "NFL";
-                 const hLogo = TEAMS[hAbbr]?.l || "nfl.svg";
-                 const aLogo = TEAMS[aAbbr]?.l || "nfl.svg";
-                 const html = `<div class="sb-team"><img src="logos/${aLogo}"> ${aAbbr}</div><div class="sb-team">${hAbbr} <img src="logos/${hLogo}"></div><span class="sb-clock">CLASSIC</span>`;
-                 send({ type: 'SCORE_UPDATE', gid: gid, html: html });
-                 updateScoreboard({ gid: gid, html: html });
-            }
-
+            const hAbbr = TEAM_IDS[data.boxscore.teams[0].team.id] || "HOME";
+            const aAbbr = TEAM_IDS[data.boxscore.teams[1].team.id] || "AWAY";
+            
             let allPlays = [];
             if(data.drives && data.drives.previous) {
                 data.drives.previous.forEach(d => { if(d.plays) d.plays.forEach(p => allPlays.push(p)); });
@@ -465,12 +610,9 @@
             setInterval(() => {
                 if(idx >= allPlays.length) return;
                 const play = allPlays[idx];
-                const analyzed = analyzePlay(play.text, play.type?.text||"");
+                const analyzed = analyzePlay(play.text, play.type?.text||"", hAbbr, aAbbr);
                 
-                const hAbbr = TEAM_IDS[data.boxscore.teams[0].team.id] || "NFL";
-                const aAbbr = TEAM_IDS[data.boxscore.teams[1].team.id] || "NFL";
-                let bgCol = TEAMS[hAbbr]?.c || "#333";
-                
+                const bgCol = TEAMS[hAbbr]?.c || "#333";
                 const payload = { 
                     type:'FEED_ITEM', 
                     events: analyzed, 
@@ -484,10 +626,9 @@
                      analyzed.forEach(evt => { if(!gameState.calls.includes(evt)) gameState.calls.push(evt); });
                      payload.calls = gameState.calls;
                 }
-                
                 send(payload); addFeedItem(payload); render();
                 idx++;
-            }, 8000); 
+            }, 5000); 
         } catch(e) { console.log(e); }
     }
 
@@ -506,36 +647,34 @@
                 const scoreText = `<div class="sb-team"><img src="logos/${aLogo}"> ${comps[1].score}</div><div class="sb-team">${comps[0].score} <img src="logos/${hLogo}"></div><span class="sb-clock">${clk}</span>`;
                 send({ type: 'SCORE_UPDATE', gid: gid, html: scoreText });
                 updateScoreboard({ gid: gid, html: scoreText });
-            }
 
-            let lastPlay = null;
-            if(data.drives?.current?.plays?.length > 0) {
-                lastPlay = data.drives.current.plays[data.drives.current.plays.length - 1];
-            } else if(data.drives?.previous?.length > 0) {
-                const prevDrive = data.drives.previous[data.drives.previous.length - 1];
-                if(prevDrive.plays && prevDrive.plays.length > 0) lastPlay = prevDrive.plays[prevDrive.plays.length - 1];
-            }
-
-            if(lastPlay && processedPlays[gid] !== lastPlay.id) {
-                processedPlays[gid] = lastPlay.id;
-                const analyzed = analyzePlay(lastPlay.text, lastPlay.type?.text || "");
-                const hAbbr = TEAM_IDS[data.boxscore.teams[0].team.id] || "NFL";
-                const aAbbr = TEAM_IDS[data.boxscore.teams[1].team.id] || "NFL";
-                const bgCol = TEAMS[hAbbr]?.c || "#333";
-
-                const payload = { type: 'FEED_ITEM', events: analyzed, text: lastPlay.text, bg: bgCol, t1: hAbbr, t2: aAbbr, calls: gameState.calls };
-                
-                if(analyzed.length > 0) {
-                    analyzed.forEach(evt => { if(!gameState.calls.includes(evt)) gameState.calls.push(evt); });
-                    payload.calls = gameState.calls;
+                let lastPlay = null;
+                if(data.drives?.current?.plays?.length > 0) {
+                    lastPlay = data.drives.current.plays[data.drives.current.plays.length - 1];
+                } else if(data.drives?.previous?.length > 0) {
+                    const prevDrive = data.drives.previous[data.drives.previous.length - 1];
+                    if(prevDrive.plays && prevDrive.plays.length > 0) lastPlay = prevDrive.plays[prevDrive.plays.length - 1];
                 }
 
-                send(payload); addFeedItem(payload); render();
-            } 
+                if(lastPlay && processedPlays[gid] !== lastPlay.id) {
+                    processedPlays[gid] = lastPlay.id;
+                    const analyzed = analyzePlay(lastPlay.text, lastPlay.type?.text || "", hAbbr, aAbbr);
+                    const bgCol = TEAMS[hAbbr]?.c || "#333";
+
+                    const payload = { type: 'FEED_ITEM', events: analyzed, text: lastPlay.text, bg: bgCol, t1: hAbbr, t2: aAbbr, calls: gameState.calls };
+                    
+                    if(analyzed.length > 0) {
+                        analyzed.forEach(evt => { if(!gameState.calls.includes(evt)) gameState.calls.push(evt); });
+                        payload.calls = gameState.calls;
+                    }
+
+                    send(payload); addFeedItem(payload); render();
+                } 
+            }
         } catch(e) { console.log("Feed Error:", e); }
     }
 
-    function analyzePlay(text, typeStr) {
+    function analyzePlay(text, typeStr, hAbbr, aAbbr) {
         if(!text) return [];
         const up = text.toUpperCase(); const typeUp = typeStr.toUpperCase(); let events = [];
         
@@ -543,7 +682,11 @@
         if(up.includes("FIELD GOAL") && !up.includes("NO GOOD") && !up.includes("MISSED")) events.push("FIELD GOAL");
         if(up.includes("MISSED") || up.includes("NO GOOD")) events.push("MISSED FG");
         if(up.includes("PUNT")) events.push("PUNT");
-        if(up.includes("SACK")) { events.push("SACK"); if(up.match(/LOSS OF (\d+)/) && parseInt(RegExp.$1)>=10) events.push("SACK 10+ YD LOSS"); }
+        
+        const isRun = !up.includes("PASS") && !up.includes("SACK") && !up.includes("KICK") && !up.includes("PUNT");
+        if(isRun && up.includes("LOSS OF")) events.push("TFL 1-9 YDS");
+
+        if(up.includes("SACK")) { events.push("SACK"); }
         if(up.includes("INTERCEPT") || typeUp.includes("INTERCEPT")) events.push("INTERCEPTION");
         if(up.includes("FUMBLE")) events.push("FUMBLE");
         if(up.includes("RECOVERED") && !up.includes("ONSIDE")) events.push("TURNOVER");
@@ -564,7 +707,8 @@
         if(up.includes("ROUGHING")) events.push("ROUGHING PASSER");
         if(up.includes("TAUNTING")) events.push("TAUNTING");
         if(up.includes("SHOTGUN") || up.includes("(SHOTGUN)")) events.push("SHOTGUN");
-        if(up.includes("FAIR CATCH")) events.push("FAIR CATCH");
+
+        if(up.match(/\b1ST DOWN\b/) || up.includes("AUTOMATIC FIRST DOWN")) events.push("1ST DOWN");
 
         const distMatch = up.match(/(\d+) (YD|YARD|YDS)/);
         if(distMatch) {
@@ -589,10 +733,13 @@
                 if(yds >= 10 && yds <= 19) events.push("RETURN 10-19 YDS");
                 if(yds >= 20) events.push("RETURN 20+ YDS");
             }
-            
-            // FIXED FIRST DOWN
-            if(yds >= 10 && !isKick) events.push("FIRST DOWN");
         }
+        
+        events.forEach(e => {
+            if(up.includes(hAbbr)) events.push(hAbbr + " " + e);
+            if(up.includes(aAbbr)) events.push(aAbbr + " " + e);
+        });
+
         return events;
     }
 
@@ -656,58 +803,64 @@
             c.events.forEach((evt, idx) => {
                 let styleAttr = "";
                 let classes = "cell";
-                let unlocked = gameState.calls.includes(evt) || idx === 12; 
+                let isFree = (evt === "FREE");
+                let unlocked = gameState.calls.includes(evt) || isFree; 
                 
                 if(unlocked) classes += " unlocked";
-                
-                if(idx===12) { classes += " free"; styleAttr = `style="background-color:${tData.c} !important;"`; }
+                if(isFree) { classes += " free"; styleAttr = `style="background-color:${tData.c} !important;"`; }
                 else if(c.marked.includes(idx)) { styleAttr = `style="background-color:${tData.c} !important; color:white !important; text-shadow:0 1px 2px rgba(0,0,0,0.8);"`; }
                 
-                // HIGHLIGHTER WIN
                 if(c.winLine.includes(idx)) {
                     classes += " win";
                     styleAttr = `style="background-color:#fbbf24 !important; color:black !important; text-shadow:none !important;"`;
                 }
                 
                 let content = evt;
-                if(idx===12) content = `<div style="background:white; border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; margin:0 auto; box-shadow:0 2px 5px rgba(0,0,0,0.3);"><img src="logos/${tData.l}" style="width:28px; height:28px; object-fit:contain;"></div>`;
+                if(isFree) content = `<div style="background:white; border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; margin:0 auto; box-shadow:0 2px 5px rgba(0,0,0,0.3);"><img src="logos/${tData.l}" style="width:28px; height:28px; object-fit:contain;"></div>`;
                 
-                let click = (isMe && unlocked && idx!==12) ? `onclick="cellClick('${pid}', 0, ${idx})"` : "";
+                let click = (isMe && unlocked && !isFree) ? `onclick="cellClick('${pid}', 0, ${idx})"` : "";
                 cellsHtml += `<div class="${classes}" ${styleAttr} ${click}>${content}</div>`;
             });
             
             let footerContent = "";
-            if(isMe) footerContent = `<button class="btn-card-action btn-use" ${c.rerolls<=0?'disabled':''} onclick="reroll('${pid}')">USE</button>`;
-            else footerContent = `<span style="opacity:0.6; font-size:0.8rem; color:white;">REROLLS: ${c.rerolls}</span>`;
+            if(isMe) footerContent = `<button class="btn-card-action btn-use" ${c.rerolls<=0?'disabled':''} onclick="reroll('${pid}', 0)">USE</button>`;
+            else footerContent = `<button class="btn-card-action btn-taunt" onclick="startTaunt('${pid}')">KICK</button>`; // RESTORED KICK BUTTON
 
-            let cardsHtml = `<div class="single-card-wrap"><div class="bingo-grid-container" style="border-color:${tData.c}"><div class="card-label" style="background:${tData.c}">CARD 1</div><div class="grid">${cellsHtml}</div></div><div class="card-footer" style="background-color:${tData.c}; border-color:${tData.c}; color:white;"><span>REROLLS: ${c.rerolls}</span>${footerContent}</div></div>`;
+            let label = `CARD 1`;
+            if(gameState.mode === 'X') label = `THE 'X' MODE`;
+            if(gameState.mode === 'LETTERS' && c.letter) label = `LETTER: ${c.letter}`;
+
+            let cardsHtml = `<div class="single-card-wrap"><div class="bingo-grid-container" style="border-color:${tData.c}"><div class="card-label" style="background:${tData.c}">${label}</div><div class="grid">${cellsHtml}</div></div><div class="card-footer" style="background-color:${tData.c}; border-color:${tData.c}; color:white;"><span>REROLLS: ${c.rerolls}</span>${footerContent}</div></div>`;
             
-            html += `<div class="player-zone ${isWinner?'winner':''} ${!isMe?'opponent':''}" style="border-color:${tData.c}"><div class="player-header"><div class="team-logo-wrap" style="border-color:${tData.c}"><img class="team-logo" src="logos/${tData.l}" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iIzMzMyIvPjwvc3ZnPg=='"></div><div class="player-name-wrap"><div class="player-name" style="background:${tData.c}">${p.name}</div></div></div><div class="cards-row">${cardsHtml}</div></div>`;
+            let anyWin = p.cards.some(c=>c.winLine.length>0);
+            html += `<div class="player-zone ${anyWin?'winner':''} ${!isMe?'opponent':''}" style="border-color:${tData.c}"><div class="player-header"><div class="team-logo-wrap" style="border-color:${tData.c}"><img class="team-logo" src="logos/${tData.l}"></div><div class="player-name-wrap"><div class="player-name" style="background:${tData.c}">${p.name}</div></div></div><div class="cards-row">${cardsHtml}</div></div>`;
         });
         board.innerHTML = html;
+        let mLabel = gameState.mode;
+        if(gameState.targetLetter) mLabel += ` (${gameState.targetLetter})`;
+        document.getElementById('mode-label').innerText = mLabel;
     }
 
     window.cellClick = function(pid, cIdx, idx) {
-        let p = gameState.players[myId]; let c = p.cards[0];
+        let p = gameState.players[myId]; let c = p.cards[cIdx];
         
         if(!gameState.calls.includes(c.events[idx])) return; 
 
         if(c.marked.includes(idx)) c.marked = c.marked.filter(x=>x!==idx); else c.marked.push(idx);
-        c.winLine = []; for(let l of WINS) if(l.every(x => c.marked.includes(x))) c.winLine = l;
         
-        WINS.forEach(line => {
-            let matches = line.filter(x => c.marked.includes(x));
-            if(matches.length === 4) {
-                let missing = line.find(x => !c.marked.includes(x));
-                let evt = c.events[missing];
-                if(evt !== "FREE") {
-                    send({ type: 'FEED_ITEM', hunt: true, text: `${myName} NEEDS A ${evt}` });
-                }
-            }
-        });
+        c.winLine = [];
+        if(gameState.mode === 'CLASSIC') {
+            for(let l of LINES) if(l.every(x => c.marked.includes(x) || c.events[x]==="FREE")) c.winLine = l;
+        } else if(gameState.mode === 'COVERALL') {
+            if(c.marked.length === 25) c.winLine = Array.from({length:25},(_,i)=>i);
+        } else if(gameState.mode === 'LETTERS' && c.letter) {
+            let required = LETTERS[c.letter];
+            if(required && required.every(x => c.marked.includes(x) || c.events[x]==="FREE")) c.winLine = required;
+        } else if(gameState.mode === 'X') {
+            if(PATTERN_X.every(x => c.marked.includes(x) || c.events[x]==="FREE")) c.winLine = PATTERN_X;
+        }
         
-        // CRITICAL FIX: Host Checks Win Immediately (Bypass network echo)
-        if(isHost && c.winLine.length > 0) {
+        if(c.winLine.length > 0) {
             currentWinnerName = myName;
             triggerWin(myName);
         }
@@ -715,11 +868,25 @@
         render(); send({ type: 'UPDATE', pData: p });
     };
 
-    window.reroll = function(pid) {
+    window.reroll = function(pid, cIdx) {
         let p = gameState.players[myId];
-        if(p.cards[0].rerolls > 0 && confirm("Burn 1 Reroll?")) { 
-            p.cards[0].rerolls--; let nc = newCard(); p.cards[0].events = nc.events; p.cards[0].marked = [12]; 
+        if(p.cards[cIdx].rerolls > 0 && confirm("Burn 1 Reroll?")) { 
+            p.cards[cIdx].rerolls--; 
+            let nc = newCard(hostGameAbbrs, p.cards[cIdx].letter); 
+            p.cards[cIdx].events = nc.events; 
+            p.cards[cIdx].marked = nc.marked; 
             render(); send({ type: 'UPDATE', pData: p }); 
+        }
+    };
+    
+    // KICK FUNCTION
+    window.startTaunt = function(targetId) {
+        if(!isHost) return;
+        if(confirm("Kick " + gameState.players[targetId].name + "?")) {
+            send({ type: 'KICKED', target: targetId });
+            delete gameState.players[targetId];
+            send({ type: 'STATE', state: gameState });
+            render();
         }
     };
 
@@ -730,12 +897,15 @@
         let h = `<div style="padding-bottom:10px; border-bottom:1px solid #ccc; margin-bottom:10px;">
                     <h3>HOW TO PLAY</h3>
                     <ul style="text-align:left; font-size:0.8rem; padding-left:20px;">
-                        <li><strong>GOAL:</strong> 5 in a row (Any Direction).</li>
+                        <li><strong>MODE:</strong> ${gameState.mode}</li>
+                        ${gameState.targetLetter ? '<li><strong>TARGET:</strong> Letter '+gameState.targetLetter+'</li>' : ''}
                         <li><strong>LOCKOUT:</strong> Squares are LOCKED until the event appears in the Official Board.</li>
-                        <li><strong>REROLLS:</strong> You have 2 rerolls. Use them wisely!</li>
                     </ul>
                 </div><h3>EVENT ODDS</h3>`; 
-        for(let k in TIERS) h += `<div class="tier-list"><div class="tier-head" style="background:${TIERS[k].color}"><span>${TIERS[k].label}</span></div><div class="tier-items">${TIERS[k].items.join(", ")}</div></div>`; 
+        for(let k in TIERS) {
+            let items = TIERS[k].items.map(i => i.split ? i.t + " (Split)" : i.t);
+            h += `<div class="tier-list"><div class="tier-head" style="background:${TIERS[k].color}"><span>${TIERS[k].label}</span></div><div class="tier-items">${items.join(", ")}</div></div>`; 
+        }
         document.getElementById('info-list').innerHTML = h; document.getElementById('info-modal').style.display='flex'; 
     }
     
@@ -743,7 +913,11 @@
 
     window.resetAll = function() { if(!isHost) return; if(confirm("New Cards for EVERYONE?")) { 
         gameState.calls = []; 
-        Object.keys(gameState.players).forEach(pid => { let p = gameState.players[pid]; gameState.players[pid] = createPlayerData(p.name, p.team, p.gameId); }); 
+        Object.keys(gameState.players).forEach(pid => { 
+            let p = gameState.players[pid]; 
+            // Reuse existing letter/abbrs
+            gameState.players[pid] = createPlayerData(p.name, p.team, gameState.cardsPerPlayer, hostGameAbbrs, gameState.targetLetter); 
+        }); 
         currentWinnerName = null; document.getElementById('winner-modal').style.display='none'; 
         render(); send({ type: 'STATE', state: gameState }); 
     }}
@@ -757,7 +931,6 @@
 
     function celebrate(winnerName) { 
         const b = document.getElementById('celebration');
-        // FORCE CLEAR
         b.innerHTML = ''; 
         
         let logoSrc = null;
@@ -768,32 +941,58 @@
             } 
         });
 
-        for(let i=0; i<60; i++){ 
-            let type = Math.random() > 0.5 ? 'football' : 'logo';
-            if(type === 'logo' && !logoSrc) type = 'football';
-
-            let f = document.createElement(type === 'football' ? 'div' : 'img');
-            f.className = 'confetti';
-            if(type === 'football') { 
-                f.className += ' football'; f.innerHTML='🏈'; f.style.fontSize=(Math.random()*4+2)+'rem'; 
-            } else { 
-                f.className += ' logo-confetti'; f.src = logoSrc; 
-            }
+        // Loop for Left Side
+        for(let i=0; i<30; i++){ 
+            let f = document.createElement('div'); 
+            f.className = 'confetti football confetti-left';
+            f.innerHTML='🏈'; 
+            f.style.fontSize=(Math.random()*3+3)+'rem'; 
             
-            f.style.left = Math.random()*100+'vw'; f.style.animationDuration=(Math.random()*2+2)+'s'; 
-            b.appendChild(f); setTimeout(()=>f.remove(),6000); 
-        } 
+            // RANDOM TRAJECTORY
+            // Mid: 20-50vw, -60 to -90vh
+            let mx = 20 + Math.random()*30;
+            let my = -60 - Math.random()*30;
+            let ex = 60 + Math.random()*40;
+            let ey = 20 + Math.random()*80;
+
+            f.style.setProperty('--mid-x', mx+'vw');
+            f.style.setProperty('--mid-y', my+'vh');
+            f.style.setProperty('--end-x', ex+'vw');
+            f.style.setProperty('--end-y', ey+'vh');
+            
+            f.style.animationDelay = (Math.random()*5)+'s';
+            b.appendChild(f);
+        }
+
+        // Loop for Right Side
+        if(logoSrc) {
+            for(let i=0; i<30; i++){ 
+                let l = document.createElement('img'); 
+                l.className = 'confetti logo-confetti confetti-right';
+                l.src = logoSrc;
+                
+                // Mirror logic
+                let mx = -20 - Math.random()*30;
+                let my = -60 - Math.random()*30;
+                let ex = -60 - Math.random()*40;
+                let ey = 20 + Math.random()*80;
+
+                l.style.setProperty('--mid-x', mx+'vw');
+                l.style.setProperty('--mid-y', my+'vh');
+                l.style.setProperty('--end-x', ex+'vw');
+                l.style.setProperty('--end-y', ey+'vh');
+
+                l.style.animationDelay = (Math.random()*5)+'s';
+                b.appendChild(l);
+            }
+        }
     }
 
     function checkGlobalWin() {
         let winnerFound = null;
         Object.values(gameState.players).forEach(p => { if(p.cards.some(c => c.winLine.length > 0)) winnerFound = p.name; });
-        
         if(winnerFound && currentWinnerName !== winnerFound) {
-            currentWinnerName = winnerFound; 
-            triggerWin(winnerFound);
-        } else if (!winnerFound) {
-            currentWinnerName = null;
+            currentWinnerName = winnerFound; triggerWin(winnerFound);
         }
     }
 
@@ -804,10 +1003,8 @@
             client.subscribe(t);
             if(isHost) setInterval(() => send({ type: 'STATE', state: gameState }), 2000);
             else {
-                send({ type: 'JOIN', name: myName, team: myTeam, gameId: myGameId });
-                if(myGameId) send({ type: 'ADD_FEED', gameId: myGameId });
-                
-                let joinInt = setInterval(() => { if(gameState.players[myId]) clearInterval(joinInt); else send({ type: 'JOIN', name: myName, team: myTeam, gameId: myGameId }); }, 2000);
+                send({ type: 'JOIN', name: myName, team: myTeam });
+                let joinInt = setInterval(() => { if(gameState.players[myId]) clearInterval(joinInt); else send({ type: 'JOIN', name: myName, team: myTeam }); }, 2000);
             }
         });
         client.on('message', (tpc, m) => {
@@ -819,8 +1016,6 @@
                     return; 
                 }
                 if(msg.type === 'SCORE_UPDATE') { updateScoreboard(msg); return; }
-                
-                // EXPLICIT WIN MESSAGE LISTENER
                 if(msg.type === 'WINNER_DECLARED') {
                     currentWinnerName = msg.name;
                     document.getElementById('winner-text').innerText = msg.name + " WINS!"; 
@@ -828,26 +1023,31 @@
                     celebrate(msg.name);
                     return;
                 }
+                // KICK HANDLER
+                if(msg.type === 'KICKED' && msg.target === myId) {
+                    alert("You have been kicked by the Host.");
+                    location.reload();
+                }
 
                 if(msg.sender === myId) return;
 
                 if(isHost) {
                     if(msg.type === 'JOIN') { 
-                        gameState.players[msg.sender] = createPlayerData(msg.name, msg.team, gameState.players[myId].gameId); 
-                        render(); send({ type: 'STATE', state: gameState }); 
-                    }
-                    if(msg.type === 'ADD_FEED') {
-                        if(msg.gameId && !gameState.activeGameIds.includes(msg.gameId)) {
-                            gameState.activeGameIds.push(msg.gameId);
+                        if(!gameState.players[msg.sender]) {
+                            // GENERATE PLAYER ON HOST
+                            gameState.players[msg.sender] = createPlayerData(msg.name, msg.team, gameState.cardsPerPlayer, hostGameAbbrs, gameState.targetLetter); 
+                            render(); send({ type: 'STATE', state: gameState }); 
+                            if(gameState.started) {
+                                let welcome = { type: 'FEED_ITEM', text: `${msg.name} HAS ENTERED THE GAME`, sys: true };
+                                send(welcome); addFeedItem(welcome);
+                            }
                         }
                     }
                     if(msg.type === 'UPDATE') { gameState.players[msg.sender] = msg.pData; checkGlobalWin(); render(); send({ type: 'STATE', state: gameState }); }
                     if(msg.type === 'UPDATE_TEAM') { if(gameState.players[msg.sender]) { gameState.players[msg.sender].team = msg.team; render(); } }
                 } else {
                     if(msg.type === 'STATE') {
-                        let local = gameState.players[myId]; gameState = msg.state;
-                        if(local && gameState.players[myId] && JSON.stringify(local.cards[0].events) === JSON.stringify(gameState.players[myId].cards[0].events)) gameState.players[myId] = local;
-                        // GUESTS DO NOT CHECK WIN
+                        gameState = msg.state;
                         render();
                     }
                 }
