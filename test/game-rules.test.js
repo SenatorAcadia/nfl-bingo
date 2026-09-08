@@ -1,7 +1,7 @@
 /*
  * Filename: test/game-rules.test.js
  * Purpose: Verify evidence-calibrated event detection, tracking, and card balance.
- * Version: 25.0.1
+ * Version: 25.1.0
  */
 
 /* Section 1: Test setup

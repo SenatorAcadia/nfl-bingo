@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <!-- 
-    NFL BEANO v25.0.1
+    NFL BEANO v25.1.0
     - GAME INTEGRITY: Empirically calibrated threshold and sequence squares.
     - HOST TOOLS: Manual event calls and reversals for feed corrections.
     - DEPLOYMENT: Runs as a static GitHub Pages site using an MQTT room relay.
@@ -9,9 +9,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFL BEANO v25.0.1</title>
+    <title>NFL BEANO v25.1.0</title>
     <script src="https://unpkg.com/mqtt@5.14.1/dist/mqtt.min.js"></script>
-    <script src="js/game-rules.js?v=25.0.1"></script>
+    <script src="js/game-rules.js?v=25.1.0"></script>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Titan+One&display=swap" rel="stylesheet">
 
     <style>
@@ -105,9 +105,10 @@
         #winner-modal { display:none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 40px; border-radius: 30px; box-shadow: 0 0 100px #fbbf24; text-align: center; z-index: 9000; border: 10px solid #fbbf24; animation: popIn 0.5s; }
         @keyframes popIn { from{transform:translate(-50%, -50%) scale(0.1);} to{transform:translate(-50%, -50%) scale(1);} }
         #celebration { position: fixed; inset: 0; pointer-events: none; z-index: 99999; overflow: hidden; }
-        .confetti { position: absolute; animation: spinFly 6s linear infinite; }
-        .football { font-size: 5rem; } .logo-confetti { width: 80px; height: 80px; object-fit: contain; }
-        @keyframes spinFly { from { transform: translate(-100px, 100vh) rotate(0deg); } to { transform: translate(120vw, -200px) rotate(720deg); } }
+        .confetti { position: absolute; left: 0; top: 0; will-change: transform, opacity; }
+        .football { line-height: 1; } .logo-confetti { object-fit: contain; }
+        .paper-confetti { width: 12px; height: 24px; border-radius: 3px; }
+        @media (prefers-reduced-motion: reduce) { .confetti { display: none; } }
         .hidden { display: none !important; }
         .waiting-msg { width: 100%; text-align: center; margin-top: 100px; font-size: 1.5rem; opacity: 0.5; animation: pulse 2s infinite; }
         #error-banner { position: fixed; top:0; left:0; width:100%; background:red; color:white; text-align: center; padding: 10px; z-index: 10000; display: none; font-size: 0.8rem;}
@@ -148,7 +149,7 @@
     <div id="lobby">
         <div class="lobby-card">
             <h1>NFL BEANO</h1>
-            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 25.0.1 &bull; ONE-CARD TUNED</p>
+            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 25.1.0 &bull; ONE-LINE CLASSIC</p>
 
             <div class="lobby-tabs">
                 <button class="tab-btn active" id="tab-host" onclick="switchTab('host')">HOST</button>
@@ -185,7 +186,7 @@
                         <div class="control-group" style="flex:2;">
                             <label>Game Mode</label>
                             <select id="game-mode-select" onchange="checkMode()">
-                                <option value="CLASSIC" selected>CLASSIC (Two Lines)</option>
+                                <option value="CLASSIC" selected>CLASSIC (One Line)</option>
                                 <option value="COVERALL">COVERALL (Full Card)</option>
                                 <option value="LETTERS">LETTERS (H, T, X...)</option>
                             </select>
@@ -794,7 +795,7 @@
         c.winLine = [];
         if(gameState.mode === 'CLASSIC') {
             const completedLines = LINES.filter(line => line.every(x => c.marked.includes(x) || c.events[x] === "FREE"));
-            if(completedLines.length >= 2) c.winLine = [...new Set(completedLines.flat())];
+            if(completedLines.length >= 1) c.winLine = completedLines[0];
         } else if(gameState.mode === 'COVERALL') {
             if(c.marked.length === 25) c.winLine = Array.from({length:25},(_,i)=>i);
         } else if(gameState.mode === 'LETTERS' && c.letter) {
@@ -870,7 +871,7 @@
                         ${gameState.targetLetter ? '<li><strong>TARGET:</strong> Letter '+gameState.targetLetter+'</li>' : ''}
                         <li><strong>LOCKOUT:</strong> Squares are locked until the event appears in the Official Board.</li>
                         <li><strong>REROLLS:</strong> Rerolls close after the first official event so late swaps cannot use previous calls.</li>
-                        <li><strong>CLASSIC WIN:</strong> Complete two lines on the same card.</li>
+                        <li><strong>CLASSIC WIN:</strong> Complete one line on a card.</li>
                         <li><strong>BALANCE:</strong> Every card has 10 common, 9 uncommon, and 5 rare events, tuned for one-card players.</li>
                     </ul>
                 </div><h3>EVENT ODDS</h3>`; 
@@ -901,63 +902,67 @@
         document.getElementById('winner-modal').style.display = 'block';
     }
 
-    function celebrate(winnerName) { 
-        const b = document.getElementById('celebration');
-        b.innerHTML = ''; 
-        
+    function celebrate(winnerName) {
+        const container = document.getElementById('celebration');
+        container.replaceChildren();
+
         let logoSrc = null;
-        Object.values(gameState.players).forEach(p => { 
-            if(p.name === winnerName) { 
-                let t = TEAMS[p.team]; 
-                if(t) logoSrc = `logos/${t.l}`; 
-            } 
+        Object.values(gameState.players).forEach(player => {
+            if(player.name === winnerName) {
+                const team = TEAMS[player.team];
+                if(team) logoSrc = `logos/${team.l}`;
+            }
         });
 
-        // Loop for Left Side
-        for(let i=0; i<30; i++){ 
-            let f = document.createElement('div'); 
-            f.className = 'confetti football confetti-left';
-            f.innerHTML='🏈'; 
-            f.style.fontSize=(Math.random()*3+3)+'rem'; 
-            
-            // RANDOM TRAJECTORY
-            // Mid: 20-50vw, -60 to -90vh
-            let mx = 20 + Math.random()*30;
-            let my = -60 - Math.random()*30;
-            let ex = 60 + Math.random()*40;
-            let ey = 20 + Math.random()*80;
+        const colors = ['#fbbf24', '#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f97316', '#ffffff'];
+        const origins = [
+            { x: -8, y: 20 }, { x: 108, y: 20 },
+            { x: -8, y: 78 }, { x: 108, y: 78 },
+            { x: 25, y: 108 }, { x: 50, y: 108 }, { x: 75, y: 108 }
+        ];
 
-            f.style.setProperty('--mid-x', mx+'vw');
-            f.style.setProperty('--mid-y', my+'vh');
-            f.style.setProperty('--end-x', ex+'vw');
-            f.style.setProperty('--end-y', ey+'vh');
-            
-            f.style.animationDelay = (Math.random()*5)+'s';
-            b.appendChild(f);
-        }
-
-        // Loop for Right Side
-        if(logoSrc) {
-            for(let i=0; i<30; i++){ 
-                let l = document.createElement('img'); 
-                l.className = 'confetti logo-confetti confetti-right';
-                l.src = logoSrc;
-                
-                // Mirror logic
-                let mx = -20 - Math.random()*30;
-                let my = -60 - Math.random()*30;
-                let ex = -60 - Math.random()*40;
-                let ey = 20 + Math.random()*80;
-
-                l.style.setProperty('--mid-x', mx+'vw');
-                l.style.setProperty('--mid-y', my+'vh');
-                l.style.setProperty('--end-x', ex+'vw');
-                l.style.setProperty('--end-y', ey+'vh');
-
-                l.style.animationDelay = (Math.random()*5)+'s';
-                b.appendChild(l);
+        for(let index = 0; index < 90; index += 1) {
+            const origin = origins[index % origins.length];
+            const isFootball = index % 11 === 0;
+            const isLogo = Boolean(logoSrc) && index % 13 === 0;
+            let particle;
+            if(isLogo) {
+                particle = document.createElement('img');
+                particle.src = logoSrc;
+                particle.alt = '';
+                particle.className = 'confetti logo-confetti';
+                particle.style.width = `${34 + Math.random() * 34}px`;
+                particle.style.height = particle.style.width;
+            } else if(isFootball) {
+                particle = document.createElement('div');
+                particle.className = 'confetti football';
+                particle.textContent = '🏈';
+                particle.style.fontSize = `${1.8 + Math.random() * 2.2}rem`;
+            } else {
+                particle = document.createElement('div');
+                particle.className = 'confetti paper-confetti';
+                particle.style.background = colors[index % colors.length];
             }
+
+            container.appendChild(particle);
+            const startX = origin.x + (Math.random() * 8 - 4);
+            const startY = origin.y + (Math.random() * 8 - 4);
+            const endX = 8 + Math.random() * 84;
+            const endY = 5 + Math.random() * 82;
+            const arcY = Math.min(startY, endY) - 25 - Math.random() * 40;
+            const spin = (Math.random() > 0.5 ? 1 : -1) * (360 + Math.random() * 1080);
+            particle.animate([
+                { transform: `translate(${startX}vw, ${startY}vh) rotate(0deg) scale(.4)`, opacity: 0 },
+                { transform: `translate(${(startX + endX) / 2}vw, ${arcY}vh) rotate(${spin / 2}deg) scale(1)`, opacity: 1, offset: 0.42 },
+                { transform: `translate(${endX}vw, ${endY}vh) rotate(${spin}deg) scale(.75)`, opacity: 0 }
+            ], {
+                duration: 1800 + Math.random() * 1800,
+                delay: Math.random() * 700,
+                easing: 'cubic-bezier(.16,.75,.35,1)',
+                fill: 'forwards'
+            });
         }
+        window.setTimeout(() => container.replaceChildren(), 4500);
     }
 
     function checkGlobalWin() {
