@@ -1,7 +1,7 @@
 /*
  * Filename: test/game-rules.test.js
  * Purpose: Verify evidence-calibrated event detection, tracking, and card balance.
- * Version: 25.0.0
+ * Version: 25.0.1
  */
 
 /* Section 1: Test setup
@@ -118,9 +118,9 @@ test("tracks both-team scoring and a tie after scoreless play", () => {
 });
 
 /* Section 4: Card-balance tests
- * Guarantee unique 8/8/8 cards with the expected free center.
+ * Guarantee unique one-card-tuned cards with the expected free center.
  */
-test("balanced classic cards contain eight squares from every tier", () => {
+test("balanced classic cards use the one-card-tuned tier mix", () => {
     const events = rules.createBalancedEvents(() => 0.42, true);
     const counts = { common: 0, uncommon: 0, rare: 0 };
     assert.equal(events.length, 25);

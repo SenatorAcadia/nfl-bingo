@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <!-- 
-    NFL BEANO v25.0.0
+    NFL BEANO v25.0.1
     - GAME INTEGRITY: Empirically calibrated threshold and sequence squares.
     - HOST TOOLS: Manual event calls and reversals for feed corrections.
     - DEPLOYMENT: Runs as a static GitHub Pages site using an MQTT room relay.
@@ -9,9 +9,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFL BEANO v25.0.0</title>
+    <title>NFL BEANO v25.0.1</title>
     <script src="https://unpkg.com/mqtt@5.14.1/dist/mqtt.min.js"></script>
-    <script src="js/game-rules.js"></script>
+    <script src="js/game-rules.js?v=25.0.1"></script>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Titan+One&display=swap" rel="stylesheet">
 
     <style>
@@ -148,7 +148,7 @@
     <div id="lobby">
         <div class="lobby-card">
             <h1>NFL BEANO</h1>
-            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 25.0.0 &bull; DATA-TUNED</p>
+            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 25.0.1 &bull; ONE-CARD TUNED</p>
 
             <div class="lobby-tabs">
                 <button class="tab-btn active" id="tab-host" onclick="switchTab('host')">HOST</button>
@@ -207,9 +207,9 @@
                         <div class="control-group" style="flex:1;">
                             <label>Cards</label>
                             <select id="card-count-select">
-                                <option value="1">1</option>
+                                <option value="1" selected>1</option>
                                 <option value="2">2</option>
-                                <option value="3" selected>3</option>
+                                <option value="3">3</option>
                             </select>
                         </div>
                     </div>
@@ -871,7 +871,7 @@
                         <li><strong>LOCKOUT:</strong> Squares are locked until the event appears in the Official Board.</li>
                         <li><strong>REROLLS:</strong> Rerolls close after the first official event so late swaps cannot use previous calls.</li>
                         <li><strong>CLASSIC WIN:</strong> Complete two lines on the same card.</li>
-                        <li><strong>BALANCE:</strong> Every card has 8 common, 8 uncommon, and 8 rare events.</li>
+                        <li><strong>BALANCE:</strong> Every card has 10 common, 9 uncommon, and 5 rare events, tuned for one-card players.</li>
                     </ul>
                 </div><h3>EVENT ODDS</h3>`; 
         for(let k in TIERS) {

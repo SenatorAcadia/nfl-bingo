@@ -1,7 +1,7 @@
 /*
  * Filename: js/game-rules.js
  * Purpose: Detect evidence-calibrated NFL BEANO events and build balanced game-night cards.
- * Version: 25.0.0
+ * Version: 25.0.1
  */
 
 /* Section 1: Module wrapper
@@ -39,7 +39,7 @@
         ])
     });
 
-    const CARD_MIX = Object.freeze({ common: 8, uncommon: 8, rare: 8 });
+    const CARD_MIX = Object.freeze({ common: 10, uncommon: 9, rare: 5 });
     const ALL_SQUARES = Object.freeze(Object.values(CATALOG).flat());
 
     /* Section 3: Feed normalization
@@ -266,10 +266,10 @@
     }
 
     /* Section 8: Public API
-     * Publish the stable browser and test surface for version 25.0.0.
+     * Publish the stable browser and test surface for version 25.0.1.
      */
     return Object.freeze({
-        version: "25.0.0",
+        version: "25.0.1",
         catalog: CATALOG,
         cardMix: CARD_MIX,
         allSquares: ALL_SQUARES,
