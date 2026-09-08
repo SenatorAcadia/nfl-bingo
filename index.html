@@ -1,15 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <!-- 
-    NFL BEANO v24.1.0
+    NFL BEANO v24.2.0
     - GAME INTEGRITY: Balanced cards, deterministic play rules, complete play processing.
     - HOST TOOLS: Manual event calls and reversals for feed corrections.
-    - COMPATIBILITY: Retains the existing lobby, MQTT rooms, replay mode, and visual design.
+    - DEPLOYMENT: Runs as a static GitHub Pages site using an MQTT room relay.
 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFL BEANO v24.1.0</title>
+    <title>NFL BEANO v24.2.0</title>
+    <script src="https://unpkg.com/mqtt@5.14.1/dist/mqtt.min.js"></script>
     <script src="js/game-rules.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Titan+One&display=swap" rel="stylesheet">
 
@@ -147,7 +148,7 @@
     <div id="lobby">
         <div class="lobby-card">
             <h1>NFL BEANO</h1>
-            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 24.1.0 &bull; GAME NIGHT</p>
+            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 24.2.0 &bull; PAGES GAME NIGHT</p>
 
             <div class="lobby-tabs">
                 <button class="tab-btn active" id="tab-host" onclick="switchTab('host')">HOST</button>
@@ -334,16 +335,15 @@
     };
     
     const TEAM_IDS = { "22":"ARI", "1":"ATL", "33":"BAL", "2":"BUF", "29":"CAR", "3":"CHI", "4":"CIN", "5":"CLE", "6":"DAL", "7":"DEN", "8":"DET", "9":"GB", "34":"HOU", "11":"IND", "30":"JAX", "12":"KC", "13":"LV", "24":"LAC", "14":"LAR", "15":"MIA", "16":"MIN", "17":"NE", "18":"NO", "19":"NYG", "20":"NYJ", "21":"PHI", "23":"PIT", "25":"SF", "26":"SEA", "27":"TB", "10":"TEN", "28":"WAS" };
+    const BROKER = 'wss://broker.emqx.io:8084/mqtt';
+    const TOPIC_PRE = 'nfl_beano_v24_2';
     let client, myId = 'p' + Math.random().toString(36).substr(2,12);
-    let hostToken = '';
-    let reconnectTimer = null;
-    let reconnectAttempts = 0;
     let hostStateInterval = null;
     let joinInterval = null;
     let myName, myTeam, roomCode, isHost = true; 
     let focusMode = false;
     let currentWinnerName = null;
-    let gameState = { players: {}, calls: [], activeGameIds: [], mode: 'CLASSIC', started: false, targetLetter: null }; 
+    let gameState = { players: {}, calls: [], activeGameIds: [], mode: 'CLASSIC', started: false, targetLetter: null, hostId: null };
     let myGameId = null;
     let hostGameAbbrs = { h: "HOME", a: "AWAY" }; 
     let processedPlays = {};
@@ -497,7 +497,7 @@
     
     document.getElementById('username').addEventListener('keyup', checkHostReady);
 
-    async function initGame() {
+    function initGame() {
         const nameInput = document.getElementById('username').value.trim();
         if(!nameInput) return alert("Enter Name");
         myName = nameInput;
@@ -508,6 +508,7 @@
             if(!myGameId) return alert("Host must select a live game feed.");
             roomCode = document.getElementById('room-input').value;
             gameState.activeGameIds = [myGameId];
+            gameState.hostId = myId;
             gameState.mode = document.getElementById('game-mode-select').value;
             gameState.cardsPerPlayer = parseInt(document.getElementById('card-count-select').value);
             
@@ -529,12 +530,6 @@
 
         if(isHost) {
             gameState.players[myId] = createPlayerData(myName, myTeam, gameState.cardsPerPlayer, hostGameAbbrs, gameState.targetLetter);
-            try {
-                await createServerRoom();
-            } catch(error) {
-                delete gameState.players[myId];
-                return alert(error.message || "Could not create the room.");
-            }
         }
 
         document.getElementById('lobby').classList.add('hidden');
@@ -552,19 +547,6 @@
         connectRoom();
         if(isHost) startHostLoop();
         render(); 
-    }
-
-    async function createServerRoom() {
-        const response = await fetch('/api/rooms', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roomCode, state: gameState })
-        });
-        const result = await response.json();
-        if(!response.ok) throw new Error(result.error || "Could not create the room.");
-        roomCode = result.roomCode;
-        hostToken = result.hostToken;
-        sessionStorage.setItem(`beano-host-${roomCode}`, hostToken);
     }
 
     function createPlayerData(name, team, count, abbrs, fixedLetter) { 
@@ -969,15 +951,19 @@
     }
 
     function connectRoom() {
-        clearTimeout(reconnectTimer);
-        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const storedToken = isHost ? (hostToken || sessionStorage.getItem(`beano-host-${roomCode}`) || '') : '';
-        const params = new URLSearchParams({ room: roomCode, clientId: myId });
-        if(storedToken) params.set('hostToken', storedToken);
-        client = new WebSocket(`${protocol}//${location.host}/ws?${params}`);
-        client.addEventListener('open', () => {
-            reconnectAttempts = 0;
+        client = mqtt.connect(BROKER, {
+            clean: true,
+            connectTimeout: 8000,
+            reconnectPeriod: 2000,
+            clientId: `beano_${myId}_${Math.random().toString(16).slice(2, 8)}`
+        });
+        const topic = `${TOPIC_PRE}/${roomCode}`;
+        client.on('connect', () => {
             document.getElementById('error-banner').style.display = 'none';
+            setFeedHealth('ROOM CONNECTED', 'ok');
+            client.subscribe(topic, error => {
+                if(error) showConnectionError('Could not join the game room. Retrying...');
+            });
             if(isHost) {
                 clearInterval(hostStateInterval);
                 hostStateInterval = setInterval(() => send({ type: 'STATE', state: gameState }), 2000);
@@ -989,13 +975,13 @@
                 joinInterval = setInterval(() => { if(gameState.players[myId]) clearInterval(joinInterval); else send({ type: 'JOIN', name: myName, team: myTeam }); }, 2000);
             }
         });
-        client.addEventListener('message', event => {
+        client.on('message', (_topic, message) => {
             try {
-                const msg = JSON.parse(event.data);
-                if(msg.type === 'ERROR') {
-                    showConnectionError(`Server rejected a game message (${msg.code}).`);
-                    return;
-                }
+                const msg = JSON.parse(message.toString());
+                const hostOnlyTypes = ['FEED_ITEM', 'SCORE_UPDATE', 'WINNER_DECLARED', 'KICKED', 'STATE'];
+                const expectedHost = isHost ? myId : gameState.hostId;
+                if(msg.type === 'STATE' && !expectedHost && msg.state?.hostId !== msg.sender) return;
+                if(hostOnlyTypes.includes(msg.type) && expectedHost && msg.sender !== expectedHost) return;
                 if(msg.type === 'FEED_ITEM') { 
                     addFeedItem(msg); 
                     if(msg.calls) { gameState.calls = msg.calls; render(); } 
@@ -1039,37 +1025,9 @@
                 }
             } catch(e) { console.log(e); }
         });
-        client.addEventListener('close', () => scheduleReconnect());
-        client.addEventListener('error', () => showConnectionError('Could not connect to the game server.'));
-    }
-
-    function scheduleReconnect() {
-        clearInterval(hostStateInterval);
-        clearInterval(joinInterval);
-        reconnectAttempts += 1;
-        const delay = Math.min(1000 * reconnectAttempts, 5000);
-        showConnectionError(`Connection lost. Reconnecting in ${Math.ceil(delay / 1000)}s...`);
-        reconnectTimer = setTimeout(async () => {
-            if(isHost) await recreateRoomAfterRestart();
-            connectRoom();
-        }, delay);
-    }
-
-    async function recreateRoomAfterRestart() {
-        try {
-            const response = await fetch('/api/rooms', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roomCode, state: gameState })
-            });
-            if(response.status === 409) return;
-            const result = await response.json();
-            if(!response.ok) throw new Error(result.error);
-            hostToken = result.hostToken;
-            sessionStorage.setItem(`beano-host-${roomCode}`, hostToken);
-        } catch(error) {
-            console.log('Room recovery waiting for server:', error);
-        }
+        client.on('offline', () => showConnectionError('Room relay offline. Reconnecting...'));
+        client.on('reconnect', () => showConnectionError('Room relay reconnecting...'));
+        client.on('error', () => showConnectionError('Could not connect to the room relay.'));
     }
 
     function showConnectionError(message) {
@@ -1079,7 +1037,8 @@
     }
 
     function send(pl) {
-        if(client && client.readyState === WebSocket.OPEN) client.send(JSON.stringify(pl));
+        pl.sender = myId;
+        if(client && client.connected) client.publish(`${TOPIC_PRE}/${roomCode}`, JSON.stringify(pl));
     }
 </script>
 </body>
