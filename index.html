@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <!-- 
-    NFL BEANO v24.2.0
-    - GAME INTEGRITY: Balanced cards, deterministic play rules, complete play processing.
+    NFL BEANO v25.0.0
+    - GAME INTEGRITY: Empirically calibrated threshold and sequence squares.
     - HOST TOOLS: Manual event calls and reversals for feed corrections.
     - DEPLOYMENT: Runs as a static GitHub Pages site using an MQTT room relay.
 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFL BEANO v24.2.0</title>
+    <title>NFL BEANO v25.0.0</title>
     <script src="https://unpkg.com/mqtt@5.14.1/dist/mqtt.min.js"></script>
     <script src="js/game-rules.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Titan+One&display=swap" rel="stylesheet">
@@ -148,7 +148,7 @@
     <div id="lobby">
         <div class="lobby-card">
             <h1>NFL BEANO</h1>
-            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 24.2.0 &bull; PAGES GAME NIGHT</p>
+            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 25.0.0 &bull; DATA-TUNED</p>
 
             <div class="lobby-tabs">
                 <button class="tab-btn active" id="tab-host" onclick="switchTab('host')">HOST</button>
@@ -185,7 +185,7 @@
                         <div class="control-group" style="flex:2;">
                             <label>Game Mode</label>
                             <select id="game-mode-select" onchange="checkMode()">
-                                <option value="CLASSIC" selected>CLASSIC (Line)</option>
+                                <option value="CLASSIC" selected>CLASSIC (Two Lines)</option>
                                 <option value="COVERALL">COVERALL (Full Card)</option>
                                 <option value="LETTERS">LETTERS (H, T, X...)</option>
                             </select>
@@ -347,6 +347,7 @@
     let myGameId = null;
     let hostGameAbbrs = { h: "HOME", a: "AWAY" }; 
     let processedPlays = {};
+    let gameTrackers = {};
     let replayStarted = new Set();
     let seenMessages = new Set();
     let ls, is_sel;
@@ -595,12 +596,13 @@
             setInterval(() => {
                 if(idx >= allPlays.length) return;
                 const play = allPlays[idx];
-                const analyzed = analyzePlay(play);
+                const analyzed = analyzePlay(play, gid);
+                const newEvents = analyzed.filter(event => !gameState.calls.includes(event));
                 
                 const bgCol = TEAMS[hAbbr]?.c || "#333";
                 const payload = { 
                     type:'FEED_ITEM', 
-                    events: analyzed, 
+                    events: newEvents,
                     text: play.text, 
                     bg: bgCol,
                     t1: hAbbr, t2: aAbbr, 
@@ -608,8 +610,8 @@
                     playId: play.id
                 };
                 
-                if(analyzed.length > 0) {
-                     analyzed.forEach(evt => { if(!gameState.calls.includes(evt)) gameState.calls.push(evt); });
+                if(newEvents.length > 0) {
+                     newEvents.forEach(evt => gameState.calls.push(evt));
                      payload.calls = gameState.calls;
                 }
                 send(payload); addFeedItem(payload); render();
@@ -643,13 +645,14 @@
                     const playId = String(play.id || `${gid}-${play.sequenceNumber || play.text}`);
                     if(processedPlays[gid].has(playId)) continue;
                     processedPlays[gid].add(playId);
-                    const analyzed = analyzePlay(play);
+                    const analyzed = analyzePlay(play, gid);
+                    const newEvents = analyzed.filter(event => !gameState.calls.includes(event));
                     const bgCol = TEAMS[hAbbr]?.c || "#333";
 
-                    const payload = { type: 'FEED_ITEM', events: analyzed, text: play.text, bg: bgCol, t1: hAbbr, t2: aAbbr, calls: gameState.calls, playId };
+                    const payload = { type: 'FEED_ITEM', events: newEvents, text: play.text, bg: bgCol, t1: hAbbr, t2: aAbbr, calls: gameState.calls, playId };
                     
-                    if(analyzed.length > 0) {
-                        analyzed.forEach(evt => { if(!gameState.calls.includes(evt)) gameState.calls.push(evt); });
+                    if(newEvents.length > 0) {
+                        newEvents.forEach(evt => gameState.calls.push(evt));
                         payload.calls = gameState.calls;
                     }
 
@@ -659,8 +662,9 @@
         } catch(e) { setFeedHealth('RETRYING - HOST CAN CALL', 'warn'); console.log("Feed Error:", e); }
     }
 
-    function analyzePlay(play) {
-        return BeanoRules.analyzePlay(play);
+    function analyzePlay(play, gameId) {
+        if(!gameTrackers[gameId]) gameTrackers[gameId] = BeanoRules.createGameTracker();
+        return gameTrackers[gameId].process(play);
     }
 
     function addFeedItem(msg) {
@@ -695,6 +699,17 @@
                 let call = document.createElement('div'); call.className = 'call-item'; call.innerText = evt; boardFeed.prepend(call);
             });
         }
+    }
+
+    function rebuildOfficialBoard() {
+        const boardFeed = document.getElementById('feed-board');
+        boardFeed.querySelectorAll('.call-item').forEach(item => item.remove());
+        gameState.calls.forEach(event => {
+            const call = document.createElement('div');
+            call.className = 'call-item';
+            call.textContent = event;
+            boardFeed.prepend(call);
+        });
     }
 
     function escapeHtml(value) {
@@ -778,7 +793,8 @@
         
         c.winLine = [];
         if(gameState.mode === 'CLASSIC') {
-            for(let l of LINES) if(l.every(x => c.marked.includes(x) || c.events[x]==="FREE")) c.winLine = l;
+            const completedLines = LINES.filter(line => line.every(x => c.marked.includes(x) || c.events[x] === "FREE"));
+            if(completedLines.length >= 2) c.winLine = [...new Set(completedLines.flat())];
         } else if(gameState.mode === 'COVERALL') {
             if(c.marked.length === 25) c.winLine = Array.from({length:25},(_,i)=>i);
         } else if(gameState.mode === 'LETTERS' && c.letter) {
@@ -830,6 +846,7 @@
         const event = document.getElementById('host-event-select').value;
         if(shouldCall && !gameState.calls.includes(event)) gameState.calls.push(event);
         if(!shouldCall) gameState.calls = gameState.calls.filter(call => call !== event);
+        rebuildOfficialBoard();
 
         const payload = {
             type: 'FEED_ITEM',
@@ -853,7 +870,8 @@
                         ${gameState.targetLetter ? '<li><strong>TARGET:</strong> Letter '+gameState.targetLetter+'</li>' : ''}
                         <li><strong>LOCKOUT:</strong> Squares are locked until the event appears in the Official Board.</li>
                         <li><strong>REROLLS:</strong> Rerolls close after the first official event so late swaps cannot use previous calls.</li>
-                        <li><strong>BALANCE:</strong> Every card has 16 common, 6 uncommon, and only 2 rare events.</li>
+                        <li><strong>CLASSIC WIN:</strong> Complete two lines on the same card.</li>
+                        <li><strong>BALANCE:</strong> Every card has 8 common, 8 uncommon, and 8 rare events.</li>
                     </ul>
                 </div><h3>EVENT ODDS</h3>`; 
         for(let k in TIERS) {
@@ -982,6 +1000,7 @@
                 const expectedHost = isHost ? myId : gameState.hostId;
                 if(msg.type === 'STATE' && !expectedHost && msg.state?.hostId !== msg.sender) return;
                 if(hostOnlyTypes.includes(msg.type) && expectedHost && msg.sender !== expectedHost) return;
+                if(msg.sender === myId) return;
                 if(msg.type === 'FEED_ITEM') { 
                     addFeedItem(msg); 
                     if(msg.calls) { gameState.calls = msg.calls; render(); } 
@@ -1001,8 +1020,6 @@
                     location.reload();
                 }
 
-                if(msg.sender === myId) return;
-
                 if(isHost) {
                     if(msg.type === 'JOIN') { 
                         if(!gameState.players[msg.sender]) {
@@ -1020,6 +1037,7 @@
                 } else {
                     if(msg.type === 'STATE') {
                         gameState = msg.state;
+                        rebuildOfficialBoard();
                         render();
                     }
                 }

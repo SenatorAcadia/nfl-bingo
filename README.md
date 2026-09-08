@@ -1,13 +1,15 @@
 # NFL BEANO
 
-Version 24.2.0 is the static game-night edition. It runs directly from GitHub Pages while retaining the corrected square rules and feed processing developed for the future server edition.
+Version 25.0.0 is the data-tuned static game-night edition. It runs directly from GitHub Pages and uses event frequencies measured across 285 complete NFL play feeds.
 
 ## 1. Current game-night scope
 
 - One host selects an NFL game and creates a four-character room.
 - Friends join from their browsers with the room code; no account or database is required.
 - The host processes every unseen ESPN play rather than only the newest play.
-- Cards contain 16 common, 6 uncommon, and 2 rare events, plus the free center in applicable modes.
+- Cards contain 8 common, 8 uncommon, and 8 rare events, plus the free center in applicable modes.
+- Classic BEANO requires two completed lines on the same card.
+- Routine automatic squares have been replaced by yardage thresholds, sequences, conversions, drive outcomes, and cumulative game events.
 - All selected cards render, and rerolls close after the first official event.
 - The host can call or revoke an event if the feed misses or misclassifies a play.
 - Feed health and replay games are available for pre-game checks.
@@ -47,4 +49,4 @@ The ESPN adapter is also temporary while a licensed live-data provider is evalua
 
 ## 5. Preserved server edition
 
-The `server-version` branch contains version 24.1.0 with the Node/WebSocket room service, host tokens, in-memory room validation, Docker packaging, and nginx example. That branch is the staging base for a future Vultr deployment and eventual login/database work.
+The `server-version` branch contains version 24.1.0 with the Node/WebSocket room service, host tokens, in-memory room validation, Docker packaging, and nginx example. The pre-calibration Pages edition remains available at commit `0a52bcb` as an immediate rollback point.

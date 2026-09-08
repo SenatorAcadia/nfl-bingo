@@ -4,6 +4,9 @@
 
 # Section 1: Dependencies
 node_modules/
+.calibration-cache/
+reports/
+scripts/
 
 # Section 2: Runtime data and secrets
 data/

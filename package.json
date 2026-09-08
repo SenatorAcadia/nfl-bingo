@@ -1,6 +1,6 @@
 {
   "name": "nfl-beano",
-  "version": "24.2.0",
+  "version": "25.0.0",
   "private": true,
   "description": "Static GitHub Pages multiplayer NFL BEANO game",
   "scripts": {
