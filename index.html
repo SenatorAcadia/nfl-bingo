@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <!-- 
-    NFL BEANO v23.0
-    - FEATURE: Kick Player. Host sees "X" button on opponent cards.
-    - LOGIC: Added 'KICKED' message type to MQTT to force-reload the victim.
-    - CORE: Retains all v22.2 logic (Replay, Hive Mind, Confetti, etc).
+    NFL BEANO v24.1.0
+    - GAME INTEGRITY: Balanced cards, deterministic play rules, complete play processing.
+    - HOST TOOLS: Manual event calls and reversals for feed corrections.
+    - COMPATIBILITY: Retains the existing lobby, MQTT rooms, replay mode, and visual design.
 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFL BEANO v23.0</title>
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <title>NFL BEANO v24.1.0</title>
+    <script src="js/game-rules.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Titan+One&display=swap" rel="stylesheet">
 
     <style>
@@ -43,6 +43,9 @@
         /* FEED */
         #feed-container { width: 95%; max-width: 900px; margin: 10px auto 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border-radius: 12px; overflow: hidden; background: #1e293b; border: 2px solid #334155; display: flex; flex-direction: column; }
         #active-games-bar { background: #0f172a; padding: 8px; display: flex; justify-content: center; gap: 10px; overflow-x: auto; border-bottom: 2px solid #334155; min-height: 46px; }
+        #feed-health { position: sticky; left: 0; display:flex; align-items:center; padding:5px 10px; border-radius:20px; background:#334155; color:#cbd5e1; font-size:0.7rem; white-space:nowrap; }
+        #feed-health.ok { background:#065f46; color:#d1fae5; }
+        #feed-health.warn { background:#92400e; color:#fef3c7; }
         .score-pill { background: #1e293b; padding: 5px 12px; border-radius: 20px; border: 1px solid #475569; color: white; font-weight: bold; font-size: 0.9rem; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
         .score-pill img { width: 24px; height: 24px; border-radius: 50%; background: white; padding: 2px; }
         #feed-split { display: flex; height: 180px; }
@@ -127,11 +130,24 @@
         </div>
     </div>
 
+    <div id="host-call-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>HOST EVENT CONTROL</h2>
+            <p style="font-size:0.85rem; color:#64748b;">Correct a missed or incorrect feed call for everyone in the room.</p>
+            <select id="host-event-select"></select>
+            <div class="row-group" style="margin-top:15px;">
+                <button class="lobby-btn btn-host" onclick="hostSetEvent(true)">CALL</button>
+                <button class="lobby-btn" style="background:#ef4444; color:white;" onclick="hostSetEvent(false)">REVOKE</button>
+            </div>
+            <button class="lobby-btn" onclick="document.getElementById('host-call-modal').style.display='none'">CLOSE</button>
+        </div>
+    </div>
+
     <!-- LOBBY -->
     <div id="lobby">
         <div class="lobby-card">
             <h1>NFL BEANO</h1>
-            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 23.0 &bull; KICK BUTTON</p>
+            <p style="color:#94a3b8; font-weight:bold; font-size: 0.8rem; margin-bottom: 20px;">VERSION 24.1.0 &bull; GAME NIGHT</p>
 
             <div class="lobby-tabs">
                 <button class="tab-btn active" id="tab-host" onclick="switchTab('host')">HOST</button>
@@ -216,7 +232,7 @@
 
     <!-- FEED & BOARD -->
     <div id="feed-container" class="hidden">
-        <div id="active-games-bar"></div>
+        <div id="active-games-bar"><div id="feed-health">FEED: STARTING</div></div>
         <div id="feed-split">
             <div id="feed-live">
                 <div class="feed-header">LIVE PLAYS</div>
@@ -235,7 +251,7 @@
             <select id="ingame-team" onchange="updateTeam()" style="padding:5px; border:1px solid #ccc; width:auto; font-size:0.8rem; height:32px;"></select>
         </div>
         <div style="display:flex; gap:5px;">
-            <button class="btn-footer" id="host-test-btn" onclick="testConfetti()" style="display:none; background:#d946ef;">TEST CONFETTI</button>
+            <button class="btn-footer" id="host-call-btn" onclick="showHostCall()" style="display:none; background:#d946ef;">CALL EVENT</button>
             <button class="btn-footer" onclick="showInfo()">RULES</button>
             <button id="toggle-view-btn" class="btn-footer" onclick="toggleFocusMode()">HIDE OTHERS</button>
             <button id="reset-btn" class="btn-footer" onclick="resetAll()" style="background:#ef4444; color:white; display:none;">RESET</button>
@@ -247,34 +263,9 @@
 <script>
     // DATASET
     const TIERS = {
-        common: { 
-            label: "COMMON", color: "#10b981", 
-            items: [
-                {t: "RUN 1-4 YDS"}, {t: "PASS 1-4 YDS"}, {t: "INC. PASS"}, 
-                {t: "PUNT", split:true}, {t: "KICKOFF"}, {t: "TOUCHBACK"}, 
-                {t: "TIMEOUT", split:true}, {t: "PENALTY FLAG"}, {t: "FALSE START"}, 
-                {t: "OFFSIDES"}, {t: "SACK", split:true}, {t: "RETURN 1-9 YDS"}
-            ] 
-        },
-        uncommon: { 
-            label: "UNCOMMON", color: "#f59e0b", 
-            items: [
-                {t: "RUN 5-9 YDS"}, {t: "PASS 5-9 YDS"}, {t: "RUN 10-19 YDS"}, {t: "PASS 10-19 YDS"}, 
-                {t: "RETURN 10-19 YDS"}, {t: "HOLDING"}, {t: "PASS INT"}, 
-                {t: "TOUCHDOWN", split:true}, {t: "FIELD GOAL", split:true}, 
-                {t: "INTERCEPTION", split:true}, {t: "FUMBLE"}, {t: "TURNOVER", split:true}, 
-                {t: "1ST DOWN"}, {t: "TFL 1-9 YDS"}, {t: "REVIEW"}, {t: "SHOTGUN"}
-            ] 
-        },
-        rare: { 
-            label: "RARE", color: "#ef4444", 
-            items: [
-                {t: "RUN 20+ YDS"}, {t: "PASS 20+ YDS"}, {t: "RETURN 20+ YDS"}, 
-                {t: "DEFENSIVE TD"}, {t: "SAFETY"}, {t: "BLOCKED KICK"}, 
-                {t: "MISSED FG", split:true}, {t: "INJURY"}, {t: "OVERTIME"}, 
-                {t: "TAUNTING"}, {t: "ROUGHING PASSER"}
-            ] 
-        }
+        common: { label: "COMMON", color: "#10b981", items: BeanoRules.catalog.common.map(t => ({ t })) },
+        uncommon: { label: "UNCOMMON", color: "#f59e0b", items: BeanoRules.catalog.uncommon.map(t => ({ t })) },
+        rare: { label: "RARE", color: "#ef4444", items: BeanoRules.catalog.rare.map(t => ({ t })) }
     };
     
     // PATTERN DEFINITIONS
@@ -343,17 +334,20 @@
     };
     
     const TEAM_IDS = { "22":"ARI", "1":"ATL", "33":"BAL", "2":"BUF", "29":"CAR", "3":"CHI", "4":"CIN", "5":"CLE", "6":"DAL", "7":"DEN", "8":"DET", "9":"GB", "34":"HOU", "11":"IND", "30":"JAX", "12":"KC", "13":"LV", "24":"LAC", "14":"LAR", "15":"MIA", "16":"MIN", "17":"NE", "18":"NO", "19":"NYG", "20":"NYJ", "21":"PHI", "23":"PIT", "25":"SF", "26":"SEA", "27":"TB", "10":"TEN", "28":"WAS" };
-    const BROKER = 'wss://broker.emqx.io:8084/mqtt';
-    const TOPIC_PRE = 'nfl_beano_v23_0';
-
-    let client, myId = 'p' + Math.random().toString(36).substr(2,6);
+    let client, myId = 'p' + Math.random().toString(36).substr(2,12);
+    let hostToken = '';
+    let reconnectTimer = null;
+    let reconnectAttempts = 0;
+    let hostStateInterval = null;
+    let joinInterval = null;
     let myName, myTeam, roomCode, isHost = true; 
     let focusMode = false;
     let currentWinnerName = null;
     let gameState = { players: {}, calls: [], activeGameIds: [], mode: 'CLASSIC', started: false, targetLetter: null }; 
     let myGameId = null;
     let hostGameAbbrs = { h: "HOME", a: "AWAY" }; 
-    let processedPlays = {}; 
+    let processedPlays = {};
+    let replayStarted = new Set();
     let seenMessages = new Set();
     let ls, is_sel;
 
@@ -364,6 +358,9 @@
             ls.innerHTML += `<option value="${t}">${TEAMS[t].n}</option>`;
             if(t!=="None") is_sel.innerHTML += `<option value="${t}">${TEAMS[t].n}</option>`;
         });
+        document.getElementById('host-event-select').innerHTML = BeanoRules.allSquares
+            .map(event => `<option value="${event}">${event}</option>`)
+            .join('');
         fetchGamesList();
         
         document.getElementById('username').addEventListener('input', function (e) {
@@ -430,17 +427,34 @@
         btn.style.display = 'block'; btn.className = 'lobby-btn btn-join'; btn.innerText = 'JOIN GAME'; btn.disabled = false; btn.onclick = () => initGame(false);
     };
 
+    async function fetchJson(url, timeoutMs = 7000) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+            if(!response.ok) throw new Error(`Feed returned HTTP ${response.status}`);
+            return await response.json();
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    function setFeedHealth(message, kind = '') {
+        const indicator = document.getElementById('feed-health');
+        if(!indicator) return;
+        indicator.textContent = `FEED: ${message}`;
+        indicator.className = kind;
+    }
+
     async function fetchGamesList() {
         const sel = document.getElementById('game-selector');
         try {
-            const resp = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard');
-            const data = await resp.json();
+            const data = await fetchJson('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard');
             sel.innerHTML = `<option value="" disabled selected>Select Game...</option>`;
             
             sel.innerHTML += `<optgroup label="CLASSIC GAMES (TESTING)">
                 <option value="401547660">SB 58: KC vs SF</option>
                 <option value="401438012">SB 57: KC vs PHI</option>
-                <option value="401326601">2021 DIV: KC vs BUF</option>
                 <option value="400999173">SB 52: PHI vs NE</option>
             </optgroup>`;
             
@@ -450,7 +464,7 @@
                     const status = e.status.type.state; 
                     const startTime = new Date(e.date);
                     const diffMins = (startTime - now) / 60000;
-                    if (status === 'in' || (status === 'pre' && diffMins <= 60)) {
+                    if (status === 'in' || (status === 'pre' && diffMins <= 24 * 60)) {
                         sel.innerHTML += `<option value="${e.id}">${e.name} (${status})</option>`;
                     }
                 });
@@ -462,8 +476,7 @@
         const gid = document.getElementById('game-selector').value;
         if(!gid) return;
         try {
-            const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
-            const data = await resp.json();
+            const data = await fetchJson(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
             if(data.header) {
                  const h = TEAM_IDS[data.boxscore.teams[0].team.id] || "HOME";
                  const a = TEAM_IDS[data.boxscore.teams[1].team.id] || "AWAY";
@@ -484,7 +497,7 @@
     
     document.getElementById('username').addEventListener('keyup', checkHostReady);
 
-    function initGame() {
+    async function initGame() {
         const nameInput = document.getElementById('username').value.trim();
         if(!nameInput) return alert("Enter Name");
         myName = nameInput;
@@ -516,6 +529,12 @@
 
         if(isHost) {
             gameState.players[myId] = createPlayerData(myName, myTeam, gameState.cardsPerPlayer, hostGameAbbrs, gameState.targetLetter);
+            try {
+                await createServerRoom();
+            } catch(error) {
+                delete gameState.players[myId];
+                return alert(error.message || "Could not create the room.");
+            }
         }
 
         document.getElementById('lobby').classList.add('hidden');
@@ -526,13 +545,26 @@
         
         if(isHost) {
             document.getElementById('reset-btn').style.display = 'block';
-            document.getElementById('host-test-btn').style.display = 'block'; 
+            document.getElementById('host-call-btn').style.display = 'block';
         }
         document.getElementById('ingame-team').value = myTeam;
         
-        connectMQTT();
+        connectRoom();
         if(isHost) startHostLoop();
         render(); 
+    }
+
+    async function createServerRoom() {
+        const response = await fetch('/api/rooms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roomCode, state: gameState })
+        });
+        const result = await response.json();
+        if(!response.ok) throw new Error(result.error || "Could not create the room.");
+        roomCode = result.roomCode;
+        hostToken = result.hostToken;
+        sessionStorage.setItem(`beano-host-${roomCode}`, hostToken);
     }
 
     function createPlayerData(name, team, count, abbrs, fixedLetter) { 
@@ -543,37 +575,7 @@
 
     function newCard(abbrs, fixedLetter) {
         let isCoverall = (gameState.mode === 'COVERALL');
-        
-        let pool = [];
-        const processTier = (tierItems, limit) => {
-            let options = [];
-            tierItems.forEach(item => {
-                if(item.split && abbrs) {
-                    options.push(abbrs.h + " " + item.t);
-                    options.push(abbrs.a + " " + item.t);
-                    options.push(item.t);
-                } else {
-                    options.push(item.t);
-                }
-            });
-            options = options.sort(() => Math.random() - 0.5);
-            return options.slice(0, limit);
-        };
-
-        pool = [
-            ...processTier(TIERS.common.items, 12),
-            ...processTier(TIERS.uncommon.items, 8),
-            ...processTier(TIERS.rare.items, 4)
-        ];
-        
-        pool = pool.sort(() => Math.random() - 0.5);
-
-        if(!isCoverall) {
-            pool.splice(12, 0, "FREE");
-        } else {
-            let extra = TIERS.common.items[Math.floor(Math.random()*TIERS.common.items.length)].t;
-            pool.splice(12, 0, extra);
-        }
+        const pool = BeanoRules.createBalancedEvents(Math.random, !isCoverall);
 
         let letter = fixedLetter || null;
         return { events: pool, marked: (!isCoverall ? [12] : []), winLine: [], rerolls: 3, letter: letter };
@@ -582,21 +584,21 @@
     function startHostLoop() {
         setInterval(() => {
             gameState.activeGameIds.forEach(gid => {
-                if(['401547660','401438012','401326601','400999173'].includes(gid)) {
-                    if(!processedPlays[gid]) startReplayMode(gid);
+                if(['401547660','401438012','400999173'].includes(gid)) {
+                    if(!replayStarted.has(gid)) startReplayMode(gid);
                 } else {
                     pollGame(gid);
                 }
             });
-        }, 8000);
+        }, 4000);
     }
 
     async function startReplayMode(gid) {
-        if(processedPlays[gid]) return;
-        processedPlays[gid] = true;
+        if(replayStarted.has(gid)) return;
+        replayStarted.add(gid);
         try {
-            const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
-            const data = await resp.json();
+            const data = await fetchJson(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
+            setFeedHealth('REPLAY CONNECTED', 'ok');
             
             const hAbbr = TEAM_IDS[data.boxscore.teams[0].team.id] || "HOME";
             const aAbbr = TEAM_IDS[data.boxscore.teams[1].team.id] || "AWAY";
@@ -607,10 +609,11 @@
             }
 
             let idx = 0;
+            const replayDelay = new URLSearchParams(location.search).get('replayFast') === '1' ? 5 : 5000;
             setInterval(() => {
                 if(idx >= allPlays.length) return;
                 const play = allPlays[idx];
-                const analyzed = analyzePlay(play.text, play.type?.text||"", hAbbr, aAbbr);
+                const analyzed = analyzePlay(play);
                 
                 const bgCol = TEAMS[hAbbr]?.c || "#333";
                 const payload = { 
@@ -619,7 +622,8 @@
                     text: play.text, 
                     bg: bgCol,
                     t1: hAbbr, t2: aAbbr, 
-                    calls: gameState.calls 
+                    calls: gameState.calls,
+                    playId: play.id
                 };
                 
                 if(analyzed.length > 0) {
@@ -628,14 +632,14 @@
                 }
                 send(payload); addFeedItem(payload); render();
                 idx++;
-            }, 5000); 
-        } catch(e) { console.log(e); }
+            }, replayDelay);
+        } catch(e) { setFeedHealth('REPLAY ERROR - USE HOST CALL', 'warn'); console.log(e); }
     }
 
     async function pollGame(gid) {
         try {
-            const resp = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
-            const data = await resp.json();
+            const data = await fetchJson(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${gid}`);
+            setFeedHealth(`LIVE ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}`, 'ok');
             
             if(data.header) {
                 const comps = data.header.competitions[0].competitors;
@@ -648,20 +652,19 @@
                 send({ type: 'SCORE_UPDATE', gid: gid, html: scoreText });
                 updateScoreboard({ gid: gid, html: scoreText });
 
-                let lastPlay = null;
-                if(data.drives?.current?.plays?.length > 0) {
-                    lastPlay = data.drives.current.plays[data.drives.current.plays.length - 1];
-                } else if(data.drives?.previous?.length > 0) {
-                    const prevDrive = data.drives.previous[data.drives.previous.length - 1];
-                    if(prevDrive.plays && prevDrive.plays.length > 0) lastPlay = prevDrive.plays[prevDrive.plays.length - 1];
-                }
+                const allPlays = [];
+                (data.drives?.previous || []).forEach(drive => (drive.plays || []).forEach(play => allPlays.push(play)));
+                (data.drives?.current?.plays || []).forEach(play => allPlays.push(play));
+                if(!processedPlays[gid]) processedPlays[gid] = new Set();
 
-                if(lastPlay && processedPlays[gid] !== lastPlay.id) {
-                    processedPlays[gid] = lastPlay.id;
-                    const analyzed = analyzePlay(lastPlay.text, lastPlay.type?.text || "", hAbbr, aAbbr);
+                for(const play of allPlays) {
+                    const playId = String(play.id || `${gid}-${play.sequenceNumber || play.text}`);
+                    if(processedPlays[gid].has(playId)) continue;
+                    processedPlays[gid].add(playId);
+                    const analyzed = analyzePlay(play);
                     const bgCol = TEAMS[hAbbr]?.c || "#333";
 
-                    const payload = { type: 'FEED_ITEM', events: analyzed, text: lastPlay.text, bg: bgCol, t1: hAbbr, t2: aAbbr, calls: gameState.calls };
+                    const payload = { type: 'FEED_ITEM', events: analyzed, text: play.text, bg: bgCol, t1: hAbbr, t2: aAbbr, calls: gameState.calls, playId };
                     
                     if(analyzed.length > 0) {
                         analyzed.forEach(evt => { if(!gameState.calls.includes(evt)) gameState.calls.push(evt); });
@@ -669,78 +672,13 @@
                     }
 
                     send(payload); addFeedItem(payload); render();
-                } 
+                }
             }
-        } catch(e) { console.log("Feed Error:", e); }
+        } catch(e) { setFeedHealth('RETRYING - HOST CAN CALL', 'warn'); console.log("Feed Error:", e); }
     }
 
-    function analyzePlay(text, typeStr, hAbbr, aAbbr) {
-        if(!text) return [];
-        const up = text.toUpperCase(); const typeUp = typeStr.toUpperCase(); let events = [];
-        
-        if(up.includes("TOUCHDOWN")) events.push("TOUCHDOWN");
-        if(up.includes("FIELD GOAL") && !up.includes("NO GOOD") && !up.includes("MISSED")) events.push("FIELD GOAL");
-        if(up.includes("MISSED") || up.includes("NO GOOD")) events.push("MISSED FG");
-        if(up.includes("PUNT")) events.push("PUNT");
-        
-        const isRun = !up.includes("PASS") && !up.includes("SACK") && !up.includes("KICK") && !up.includes("PUNT");
-        if(isRun && up.includes("LOSS OF")) events.push("TFL 1-9 YDS");
-
-        if(up.includes("SACK")) { events.push("SACK"); }
-        if(up.includes("INTERCEPT") || typeUp.includes("INTERCEPT")) events.push("INTERCEPTION");
-        if(up.includes("FUMBLE")) events.push("FUMBLE");
-        if(up.includes("RECOVERED") && !up.includes("ONSIDE")) events.push("TURNOVER");
-        if(up.includes("TIMEOUT")) events.push("TIMEOUT");
-        if(up.includes("PENALTY") || up.includes("FLAG")) events.push("PENALTY FLAG");
-        if(up.includes("INCOMPLETE")) events.push("INC. PASS");
-        if(typeUp.includes("KICKOFF")) events.push("KICKOFF");
-        if(up.includes("TOUCHBACK")) events.push("TOUCHBACK");
-        if(up.includes("REVERSED") || up.includes("REVIEW")) events.push("REVIEW");
-        if(up.includes("INJURY")) events.push("INJURY");
-        if(up.includes("SAFETY")) events.push("SAFETY");
-        if(up.includes("BLOCKED")) events.push("BLOCKED KICK");
-        
-        if(up.includes("HOLDING")) events.push("HOLDING");
-        if(up.includes("FALSE START")) events.push("FALSE START");
-        if(up.includes("OFFSIDE")) events.push("OFFSIDES");
-        if(up.includes("INTERFERENCE")) events.push("PASS INT");
-        if(up.includes("ROUGHING")) events.push("ROUGHING PASSER");
-        if(up.includes("TAUNTING")) events.push("TAUNTING");
-        if(up.includes("SHOTGUN") || up.includes("(SHOTGUN)")) events.push("SHOTGUN");
-
-        if(up.match(/\b1ST DOWN\b/) || up.includes("AUTOMATIC FIRST DOWN")) events.push("1ST DOWN");
-
-        const distMatch = up.match(/(\d+) (YD|YARD|YDS)/);
-        if(distMatch) {
-            const yds = parseInt(distMatch[1]);
-            const isPass = up.includes("PASS") || up.includes("COMPLETE") || up.includes("THROWN");
-            const isKick = up.includes("KICK") || up.includes("PUNT");
-            
-            if(yds >= 1 && yds <= 4 && !isPass && !isKick) events.push("RUN 1-4 YDS");
-            if(yds >= 5 && yds <= 9 && !isPass && !isKick) events.push("RUN 5-9 YDS");
-            if(yds >= 10 && yds <= 19 && !isPass && !isKick) events.push("RUN 10-19 YDS");
-            if(yds >= 20 && yds <= 39 && !isPass && !isKick) events.push("RUN 20-39 YDS");
-            if(yds >= 40 && !isPass && !isKick) events.push("RUN 40+ YDS");
-            
-            if(yds >= 1 && yds <= 4 && isPass) events.push("PASS 1-4 YDS");
-            if(yds >= 5 && yds <= 9 && isPass) events.push("PASS 5-9 YDS");
-            if(yds >= 10 && yds <= 19 && isPass) events.push("PASS 10-19 YDS");
-            if(yds >= 20 && yds <= 39 && isPass) events.push("PASS 20-39 YDS");
-            if(yds >= 40 && isPass) events.push("PASS 40+ YDS");
-
-            if(isKick && (up.includes("RETURN") || !up.includes("TOUCHBACK"))) {
-                if(yds >= 1 && yds <= 9) events.push("RETURN 1-9 YDS");
-                if(yds >= 10 && yds <= 19) events.push("RETURN 10-19 YDS");
-                if(yds >= 20) events.push("RETURN 20+ YDS");
-            }
-        }
-        
-        events.forEach(e => {
-            if(up.includes(hAbbr)) events.push(hAbbr + " " + e);
-            if(up.includes(aAbbr)) events.push(aAbbr + " " + e);
-        });
-
-        return events;
+    function analyzePlay(play) {
+        return BeanoRules.analyzePlay(play);
     }
 
     function addFeedItem(msg) {
@@ -753,7 +691,10 @@
         const div = document.createElement('div');
         div.className = 'live-item';
         
-        if(msg.hunt) { 
+        if(msg.sys) {
+            div.className += ' sys';
+            div.innerHTML = `<div class="feed-text-bubble">${escapeHtml(msg.text)}</div>`;
+        } else if(msg.hunt) {
             div.className += ' hunt'; div.innerText = msg.text; 
         } else {
             const l1 = (TEAMS[msg.t1] && TEAMS[msg.t1].l) ? TEAMS[msg.t1].l : 'nfl.svg';
@@ -772,6 +713,12 @@
                 let call = document.createElement('div'); call.className = 'call-item'; call.innerText = evt; boardFeed.prepend(call);
             });
         }
+    }
+
+    function escapeHtml(value) {
+        const node = document.createElement('div');
+        node.textContent = String(value || '');
+        return node.innerHTML;
     }
 
     function updateScoreboard(msg) {
@@ -797,43 +744,42 @@
             
             if(!p.cards || p.cards.length === 0) return; 
 
-            let c = p.cards[0]; 
-            let cellsHtml = "";
+            let cardsHtml = "";
+            p.cards.forEach((c, cIdx) => {
+                let cellsHtml = "";
+                c.events.forEach((evt, idx) => {
+                    let styleAttr = "";
+                    let classes = "cell";
+                    let isFree = (evt === "FREE");
+                    let unlocked = gameState.calls.includes(evt) || isFree;
 
-            c.events.forEach((evt, idx) => {
-                let styleAttr = "";
-                let classes = "cell";
-                let isFree = (evt === "FREE");
-                let unlocked = gameState.calls.includes(evt) || isFree; 
-                
-                if(unlocked) classes += " unlocked";
-                if(isFree) { classes += " free"; styleAttr = `style="background-color:${tData.c} !important;"`; }
-                else if(c.marked.includes(idx)) { styleAttr = `style="background-color:${tData.c} !important; color:white !important; text-shadow:0 1px 2px rgba(0,0,0,0.8);"`; }
-                
-                if(c.winLine.includes(idx)) {
-                    classes += " win";
-                    styleAttr = `style="background-color:#fbbf24 !important; color:black !important; text-shadow:none !important;"`;
-                }
-                
-                let content = evt;
-                if(isFree) content = `<div style="background:white; border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; margin:0 auto; box-shadow:0 2px 5px rgba(0,0,0,0.3);"><img src="logos/${tData.l}" style="width:28px; height:28px; object-fit:contain;"></div>`;
-                
-                let click = (isMe && unlocked && !isFree) ? `onclick="cellClick('${pid}', 0, ${idx})"` : "";
-                cellsHtml += `<div class="${classes}" ${styleAttr} ${click}>${content}</div>`;
+                    if(unlocked) classes += " unlocked";
+                    if(isFree) { classes += " free"; styleAttr = `style="background-color:${tData.c} !important;"`; }
+                    else if(c.marked.includes(idx)) { styleAttr = `style="background-color:${tData.c} !important; color:white !important; text-shadow:0 1px 2px rgba(0,0,0,0.8);"`; }
+
+                    if(c.winLine.includes(idx)) {
+                        classes += " win";
+                        styleAttr = `style="background-color:#fbbf24 !important; color:black !important; text-shadow:none !important;"`;
+                    }
+
+                    let content = evt;
+                    if(isFree) content = `<div style="background:white; border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; margin:0 auto; box-shadow:0 2px 5px rgba(0,0,0,0.3);"><img src="logos/${tData.l}" style="width:28px; height:28px; object-fit:contain;"></div>`;
+
+                    let click = (isMe && unlocked && !isFree) ? `onclick="cellClick('${pid}', ${cIdx}, ${idx})"` : "";
+                    cellsHtml += `<div class="${classes}" ${styleAttr} ${click}>${content}</div>`;
+                });
+
+                let footerContent = "";
+                if(isMe) footerContent = `<button class="btn-card-action btn-use" ${c.rerolls<=0?'disabled':''} onclick="reroll('${pid}', ${cIdx})">USE</button>`;
+
+                let label = `CARD ${cIdx + 1}`;
+                if(gameState.mode === 'LETTERS' && c.letter) label += ` &bull; LETTER ${c.letter}`;
+                cardsHtml += `<div class="single-card-wrap"><div class="bingo-grid-container" style="border-color:${tData.c}"><div class="card-label" style="background:${tData.c}">${label}</div><div class="grid">${cellsHtml}</div></div><div class="card-footer" style="background-color:${tData.c}; border-color:${tData.c}; color:white;"><span>REROLLS: ${c.rerolls}</span>${footerContent}</div></div>`;
             });
             
-            let footerContent = "";
-            if(isMe) footerContent = `<button class="btn-card-action btn-use" ${c.rerolls<=0?'disabled':''} onclick="reroll('${pid}', 0)">USE</button>`;
-            else footerContent = `<button class="btn-card-action btn-taunt" onclick="startTaunt('${pid}')">KICK</button>`; // RESTORED KICK BUTTON
-
-            let label = `CARD 1`;
-            if(gameState.mode === 'X') label = `THE 'X' MODE`;
-            if(gameState.mode === 'LETTERS' && c.letter) label = `LETTER: ${c.letter}`;
-
-            let cardsHtml = `<div class="single-card-wrap"><div class="bingo-grid-container" style="border-color:${tData.c}"><div class="card-label" style="background:${tData.c}">${label}</div><div class="grid">${cellsHtml}</div></div><div class="card-footer" style="background-color:${tData.c}; border-color:${tData.c}; color:white;"><span>REROLLS: ${c.rerolls}</span>${footerContent}</div></div>`;
-            
             let anyWin = p.cards.some(c=>c.winLine.length>0);
-            html += `<div class="player-zone ${anyWin?'winner':''} ${!isMe?'opponent':''}" style="border-color:${tData.c}"><div class="player-header"><div class="team-logo-wrap" style="border-color:${tData.c}"><img class="team-logo" src="logos/${tData.l}"></div><div class="player-name-wrap"><div class="player-name" style="background:${tData.c}">${p.name}</div></div></div><div class="cards-row">${cardsHtml}</div></div>`;
+            const kickButton = (!isMe && isHost) ? `<button class="btn-kick" onclick="startTaunt('${pid}')" aria-label="Kick ${p.name}">X</button>` : "";
+            html += `<div class="player-zone ${anyWin?'winner':''} ${!isMe?'opponent':''}" style="border-color:${tData.c}">${kickButton}<div class="player-header"><div class="team-logo-wrap" style="border-color:${tData.c}"><img class="team-logo" src="logos/${tData.l}"></div><div class="player-name-wrap"><div class="player-name" style="background:${tData.c}">${p.name}</div></div></div><div class="cards-row">${cardsHtml}</div></div>`;
         });
         board.innerHTML = html;
         let mLabel = gameState.mode;
@@ -856,8 +802,6 @@
         } else if(gameState.mode === 'LETTERS' && c.letter) {
             let required = LETTERS[c.letter];
             if(required && required.every(x => c.marked.includes(x) || c.events[x]==="FREE")) c.winLine = required;
-        } else if(gameState.mode === 'X') {
-            if(PATTERN_X.every(x => c.marked.includes(x) || c.events[x]==="FREE")) c.winLine = PATTERN_X;
         }
         
         if(c.winLine.length > 0) {
@@ -870,6 +814,7 @@
 
     window.reroll = function(pid, cIdx) {
         let p = gameState.players[myId];
+        if(gameState.calls.length > 0) return alert("Rerolls close after the first official event.");
         if(p.cards[cIdx].rerolls > 0 && confirm("Burn 1 Reroll?")) { 
             p.cards[cIdx].rerolls--; 
             let nc = newCard(hostGameAbbrs, p.cards[cIdx].letter); 
@@ -892,6 +837,31 @@
 
     window.updateTeam = function() { let t = document.getElementById('ingame-team').value; if(gameState.players[myId]) { gameState.players[myId].team = t; render(); send({ type: 'UPDATE_TEAM', team: t }); } }
     window.toggleFocusMode = function() { focusMode = !focusMode; document.getElementById('toggle-view-btn').innerText = focusMode?"SHOW OTHERS":"HIDE OTHERS"; render(); }
+
+    window.showHostCall = function() {
+        if(!isHost) return;
+        document.getElementById('host-call-modal').style.display = 'flex';
+    };
+
+    window.hostSetEvent = function(shouldCall) {
+        if(!isHost) return;
+        const event = document.getElementById('host-event-select').value;
+        if(shouldCall && !gameState.calls.includes(event)) gameState.calls.push(event);
+        if(!shouldCall) gameState.calls = gameState.calls.filter(call => call !== event);
+
+        const payload = {
+            type: 'FEED_ITEM',
+            text: `HOST ${shouldCall ? 'CALLED' : 'REVOKED'}: ${event}`,
+            events: shouldCall ? [event] : [],
+            calls: gameState.calls,
+            sys: true,
+            playId: `manual-${Date.now()}`
+        };
+        send(payload);
+        send({ type: 'STATE', state: gameState });
+        addFeedItem(payload);
+        render();
+    };
     
     window.showInfo = function() { 
         let h = `<div style="padding-bottom:10px; border-bottom:1px solid #ccc; margin-bottom:10px;">
@@ -899,7 +869,9 @@
                     <ul style="text-align:left; font-size:0.8rem; padding-left:20px;">
                         <li><strong>MODE:</strong> ${gameState.mode}</li>
                         ${gameState.targetLetter ? '<li><strong>TARGET:</strong> Letter '+gameState.targetLetter+'</li>' : ''}
-                        <li><strong>LOCKOUT:</strong> Squares are LOCKED until the event appears in the Official Board.</li>
+                        <li><strong>LOCKOUT:</strong> Squares are locked until the event appears in the Official Board.</li>
+                        <li><strong>REROLLS:</strong> Rerolls close after the first official event so late swaps cannot use previous calls.</li>
+                        <li><strong>BALANCE:</strong> Every card has 16 common, 6 uncommon, and only 2 rare events.</li>
                     </ul>
                 </div><h3>EVENT ODDS</h3>`; 
         for(let k in TIERS) {
@@ -996,20 +968,34 @@
         }
     }
 
-    function connectMQTT() {
-        client = mqtt.connect(BROKER);
-        const t = `${TOPIC_PRE}/${roomCode}`;
-        client.on('connect', () => {
-            client.subscribe(t);
-            if(isHost) setInterval(() => send({ type: 'STATE', state: gameState }), 2000);
+    function connectRoom() {
+        clearTimeout(reconnectTimer);
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const storedToken = isHost ? (hostToken || sessionStorage.getItem(`beano-host-${roomCode}`) || '') : '';
+        const params = new URLSearchParams({ room: roomCode, clientId: myId });
+        if(storedToken) params.set('hostToken', storedToken);
+        client = new WebSocket(`${protocol}//${location.host}/ws?${params}`);
+        client.addEventListener('open', () => {
+            reconnectAttempts = 0;
+            document.getElementById('error-banner').style.display = 'none';
+            if(isHost) {
+                clearInterval(hostStateInterval);
+                hostStateInterval = setInterval(() => send({ type: 'STATE', state: gameState }), 2000);
+                send({ type: 'STATE', state: gameState });
+            }
             else {
                 send({ type: 'JOIN', name: myName, team: myTeam });
-                let joinInt = setInterval(() => { if(gameState.players[myId]) clearInterval(joinInt); else send({ type: 'JOIN', name: myName, team: myTeam }); }, 2000);
+                clearInterval(joinInterval);
+                joinInterval = setInterval(() => { if(gameState.players[myId]) clearInterval(joinInterval); else send({ type: 'JOIN', name: myName, team: myTeam }); }, 2000);
             }
         });
-        client.on('message', (tpc, m) => {
+        client.addEventListener('message', event => {
             try {
-                const msg = JSON.parse(m.toString());
+                const msg = JSON.parse(event.data);
+                if(msg.type === 'ERROR') {
+                    showConnectionError(`Server rejected a game message (${msg.code}).`);
+                    return;
+                }
                 if(msg.type === 'FEED_ITEM') { 
                     addFeedItem(msg); 
                     if(msg.calls) { gameState.calls = msg.calls; render(); } 
@@ -1053,9 +1039,48 @@
                 }
             } catch(e) { console.log(e); }
         });
+        client.addEventListener('close', () => scheduleReconnect());
+        client.addEventListener('error', () => showConnectionError('Could not connect to the game server.'));
     }
-    
-    function send(pl) { pl.sender = myId; if(client) client.publish(`${TOPIC_PRE}/${roomCode}`, JSON.stringify(pl)); }
+
+    function scheduleReconnect() {
+        clearInterval(hostStateInterval);
+        clearInterval(joinInterval);
+        reconnectAttempts += 1;
+        const delay = Math.min(1000 * reconnectAttempts, 5000);
+        showConnectionError(`Connection lost. Reconnecting in ${Math.ceil(delay / 1000)}s...`);
+        reconnectTimer = setTimeout(async () => {
+            if(isHost) await recreateRoomAfterRestart();
+            connectRoom();
+        }, delay);
+    }
+
+    async function recreateRoomAfterRestart() {
+        try {
+            const response = await fetch('/api/rooms', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ roomCode, state: gameState })
+            });
+            if(response.status === 409) return;
+            const result = await response.json();
+            if(!response.ok) throw new Error(result.error);
+            hostToken = result.hostToken;
+            sessionStorage.setItem(`beano-host-${roomCode}`, hostToken);
+        } catch(error) {
+            console.log('Room recovery waiting for server:', error);
+        }
+    }
+
+    function showConnectionError(message) {
+        const banner = document.getElementById('error-banner');
+        banner.textContent = message;
+        banner.style.display = 'block';
+    }
+
+    function send(pl) {
+        if(client && client.readyState === WebSocket.OPEN) client.send(JSON.stringify(pl));
+    }
 </script>
 </body>
 </html>

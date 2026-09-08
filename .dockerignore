@@ -1,0 +1,13 @@
+# Filename: .dockerignore
+# Purpose: Keep development and runtime-only content out of the container image.
+# Version: 24.0.0
+
+# Section 1: Repository and dependencies
+.git
+node_modules
+
+# Section 2: Runtime and local files
+data
+.env
+*.log
+test

@@ -1,0 +1,15 @@
+# Filename: .gitignore
+# Purpose: Keep dependencies, runtime databases, secrets, and local artifacts out of Git.
+# Version: 24.0.0
+
+# Section 1: Dependencies
+node_modules/
+
+# Section 2: Runtime data and secrets
+data/
+.env
+
+# Section 3: Local tooling
+*.log
+.DS_Store
+Thumbs.db

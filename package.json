@@ -1,0 +1,17 @@
+{
+  "name": "nfl-beano",
+  "version": "24.1.0",
+  "private": true,
+  "description": "Server-backed multiplayer NFL BEANO game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
